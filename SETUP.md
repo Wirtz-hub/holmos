@@ -54,15 +54,22 @@ them all.
 
 ## 3. Connect Meta Ads
 
-1. Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create App**.
-   Choose **Other**, then app type **Business**, name it "HolmOS", and link it to the
-   HolmNordic Business portfolio.
-2. In the app dashboard, add the products **Marketing API** and **Facebook Login for Business**.
-3. *Facebook Login for Business → Settings*: under **Valid OAuth Redirect URIs** add
-   `https://YOUR-APP-ADDRESS/api/oauth/meta/callback` and save.
-4. *Facebook Login for Business → Configurations → Create configuration*: choose
-   **User access token**, and tick the permissions **ads_read** and **business_management**.
-   Copy the **Configuration ID**.
+1. Go to [developers.facebook.com](https://developers.facebook.com) → **My Apps → Create app**.
+   - **App details:** name it "HolmOS" and use your email.
+   - **Use cases:** pick **Create & manage ads with Marketing API**.
+   - **Business:** choose the HolmNordic business portfolio.
+   - Click through the remaining screens and create the app.
+
+   This use case adds **Marketing API** and **Facebook Login for Business** to the app for you.
+2. *Use cases → Create & manage ads → Customize*: make sure **ads_read** and
+   **business_management** are listed (add them if not).
+3. *Facebook Login for Business → Settings*: switch on **Client OAuth login** and
+   **Web OAuth login**. Under **Valid OAuth Redirect URIs** add
+   `https://YOUR-APP-ADDRESS/api/oauth/meta/callback`, plus
+   `http://localhost:3000/api/oauth/meta/callback` if you'll also test on your computer. Save.
+4. *Facebook Login for Business → Configurations → Create configuration*: name it "HolmOS",
+   choose **User access token**, give it access to **Ad accounts**, and tick the permissions
+   **ads_read** and **business_management**. Copy the **Configuration ID**.
 5. *App settings → Basic*: copy the **App ID** and **App secret**.
 6. Add to Vercel and redeploy:
 
@@ -95,8 +102,9 @@ Google needs two things: a Google Cloud "app" for the login, and a Google Ads **
    Google logs you out every 7 days.) When you connect, Google will say the app is
    unverified — click **Advanced → Go to HolmOS**. That's expected for a private tool.
 5. *Clients → Create client* → type **Web application**. Under **Authorized redirect URIs**
-   add `https://YOUR-APP-ADDRESS/api/oauth/google/callback`. Copy the **Client ID** and
-   **Client secret**.
+   add `https://YOUR-APP-ADDRESS/api/oauth/google/callback` (plus
+   `http://localhost:3000/api/oauth/google/callback` to test on your computer). Copy the
+   **Client ID** and **Client secret**.
 
 **The developer token (Google Ads):**
 
@@ -105,9 +113,13 @@ Google needs two things: a Google Cloud "app" for the login, and a Google Ads **
    if you don't have one, and link your clients' accounts to it.
 7. In the manager account: *Admin → API Center*. Fill in the form and copy the
    **Developer token**.
-8. A new token only works with *test* accounts. On the same page, **apply for Basic access**
-   (describe it as "internal reporting tool for my agency's clients"). Approval usually takes
-   a few days. Until then HolmOS will say the token only works with test accounts.
+8. Check the **access level** shown next to the token:
+   - **Explorer access** already works with real client accounts (up to 2,880 requests a day,
+     plenty for a handful of clients). You're done.
+   - **Test account access** only works with test accounts. On the same page, **apply for
+     Basic access** (describe it as "internal reporting tool for my agency's own clients").
+     Google's review takes from a couple of days to a few weeks. Until it's approved, HolmOS
+     will say the token only works with test accounts.
 
 9. Add to Vercel and redeploy:
 
