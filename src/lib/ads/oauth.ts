@@ -6,25 +6,27 @@ import { serverEnv, type Platform } from "@/lib/env";
 
 // CSRF protection for the OAuth round-trip: a random state value lives in a
 // short-lived cookie and must come back unchanged from Meta/Google.
+// `name` is the platform ("meta", "google") or "calendar" for Google Calendar,
+// and `path` is where that login's routes live.
 
-const cookieName = (platform: Platform) => `holmos_oauth_${platform}`;
+const cookieName = (name: string) => `holmos_oauth_${name}`;
 
-export async function createOAuthState(platform: Platform) {
+export async function createOAuthState(name: string, path = "/api/oauth") {
   const state = randomBytes(24).toString("base64url");
-  (await cookies()).set(cookieName(platform), state, {
+  (await cookies()).set(cookieName(name), state, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    path: "/api/oauth",
+    path,
     maxAge: 600,
   });
   return state;
 }
 
-export async function consumeOAuthState(platform: Platform, returned: string | null) {
+export async function consumeOAuthState(name: string, returned: string | null, path = "/api/oauth") {
   const store = await cookies();
-  const expected = store.get(cookieName(platform))?.value;
-  store.delete({ name: cookieName(platform), path: "/api/oauth" });
+  const expected = store.get(cookieName(name))?.value;
+  store.delete({ name: cookieName(name), path });
   if (!expected || !returned) return false;
   const a = Buffer.from(expected);
   const b = Buffer.from(returned);

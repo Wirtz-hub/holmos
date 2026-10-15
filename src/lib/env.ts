@@ -24,7 +24,39 @@ export function serverEnv() {
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
     googleDeveloperToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN ?? "",
     googleAdsApiVersion: process.env.GOOGLE_ADS_API_VERSION ?? "v25",
+
+    resendApiKey: process.env.RESEND_API_KEY ?? "",
+    emailFrom: process.env.EMAIL_FROM ?? "",
+    cronSecret: process.env.CRON_SECRET ?? "",
   };
+}
+
+/** Which settings are missing before Google Calendar can be connected. */
+export function missingCalendarSettings(): string[] {
+  const env = serverEnv();
+  return (
+    [
+      ["SUPABASE_SECRET_KEY", env.supabaseSecretKey],
+      ["TOKEN_ENCRYPTION_KEY", env.tokenEncryptionKey],
+      ["GOOGLE_CLIENT_ID", env.googleClientId],
+      ["GOOGLE_CLIENT_SECRET", env.googleClientSecret],
+    ] as [string, string][]
+  )
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+}
+
+/** Which settings are missing before HolmOS can send emails (booking confirmations, reminders). */
+export function missingEmailSettings(): string[] {
+  const env = serverEnv();
+  return (
+    [
+      ["RESEND_API_KEY", env.resendApiKey],
+      ["EMAIL_FROM", env.emailFrom],
+    ] as [string, string][]
+  )
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
 }
 
 export type Platform = "meta" | "google";

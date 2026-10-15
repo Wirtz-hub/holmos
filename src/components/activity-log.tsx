@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowRightLeft, CalendarDays, Link2, Mail, PhoneCall, Sparkles, StickyNote, Unplug } from "lucide-react";
+import { ArrowRightLeft, CalendarCheck, CalendarDays, CalendarX, ClipboardList, Link2, Mail, PhoneCall, Sparkles, StickyNote, Unplug } from "lucide-react";
 import { useActionState, useState } from "react";
 import { Button, Card, CardHeader, cx, inputClass } from "@/components/ui";
 import { addActivityAction } from "@/lib/actions/clients";
@@ -24,7 +24,27 @@ const KIND_STYLE: Record<ActivityKind, { icon: typeof StickyNote; tone: string; 
   meeting: { icon: CalendarDays, tone: "bg-amber-50 text-amber-700", label: "Meeting" },
   ad_account_assigned: { icon: Link2, tone: "bg-slate-100 text-slate-600", label: "Ad account" },
   ad_account_unassigned: { icon: Unplug, tone: "bg-slate-100 text-slate-600", label: "Ad account" },
+  form_submitted: { icon: ClipboardList, tone: "bg-teal-50 text-teal-700", label: "Form" },
+  booking_created: { icon: CalendarCheck, tone: "bg-emerald-50 text-emerald-700", label: "Booking" },
+  booking_cancelled: { icon: CalendarX, tone: "bg-rose-50 text-rose-700", label: "Booking" },
 };
+
+/** "Tue 20 Oct, 10:00" in the booking page's time zone. */
+function meetingTime(iso?: string, timeZone?: string) {
+  if (!iso) return "";
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timeZone || "Europe/Copenhagen",
+    }).format(new Date(iso));
+  } catch {
+    return iso;
+  }
+}
 
 const platformName = (platform?: string) => (platform === "google" ? "Google" : "Meta");
 
@@ -39,6 +59,12 @@ function describe(activity: Activity): string {
       return `${platformName(meta.platform)} ad account “${meta.account}” assigned`;
     case "ad_account_unassigned":
       return `${platformName(meta.platform)} ad account “${meta.account}” removed`;
+    case "form_submitted":
+      return `Filled in the form “${meta.form ?? "a form"}”`;
+    case "booking_created":
+      return `Booked “${meta.calendar}” for ${meetingTime(meta.starts_at, meta.time_zone)}`;
+    case "booking_cancelled":
+      return `${meta.by === "guest" ? "Cancelled" : "You cancelled"} “${meta.calendar}” on ${meetingTime(meta.starts_at, meta.time_zone)}`;
     default:
       return KIND_STYLE[activity.kind].label;
   }
@@ -86,7 +112,7 @@ export function ActivityLog({ clientId, activities }: { clientId: string; activi
           {activities.map((activity) => {
             const style = KIND_STYLE[activity.kind] ?? KIND_STYLE.note;
             const Icon = style.icon;
-            const manual = ["note", "call", "email", "meeting"].includes(activity.kind);
+            const showBody = ["note", "call", "email", "meeting", "form_submitted", "booking_created"].includes(activity.kind);
             return (
               <li key={activity.id} className="flex gap-3">
                 <span className={cx("mt-0.5 grid size-7 shrink-0 place-items-center rounded-full", style.tone)}>
@@ -99,8 +125,11 @@ export function ActivityLog({ clientId, activities }: { clientId: string; activi
                       {formatDateTime(activity.created_at)}
                     </time>
                   </div>
-                  {manual && activity.body && (
+                  {showBody && activity.body && (
                     <p className="mt-1 text-sm whitespace-pre-wrap text-slate-600">{activity.body}</p>
+                  )}
+                  {activity.kind === "form_submitted" && activity.meta?.page && (
+                    <p className="mt-1 truncate text-xs text-slate-400">From {activity.meta.page}</p>
                   )}
                 </div>
               </li>

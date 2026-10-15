@@ -1,6 +1,6 @@
 "use client";
 
-import { ChartColumn, LogOut, Menu, Plug, SquareKanban, Users, X } from "lucide-react";
+import { CalendarDays, ChartColumn, ClipboardList, LayoutTemplate, LogOut, Menu, Plug, SquareKanban, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -8,33 +8,58 @@ import { cx } from "@/components/ui";
 import { signOutAction } from "@/lib/actions/auth";
 
 const NAV = [
-  { href: "/", label: "Pipeline", icon: SquareKanban, match: (p: string) => p === "/" },
-  { href: "/clients", label: "Clients", icon: Users, match: (p: string) => p.startsWith("/clients") && !p.endsWith("/dashboard") },
-  { href: "/dashboards", label: "Dashboards", icon: ChartColumn, match: (p: string) => p.startsWith("/dashboards") || p.endsWith("/dashboard") },
-  { href: "/ad-accounts", label: "Ad accounts", icon: Plug, match: (p: string) => p.startsWith("/ad-accounts") },
+  {
+    heading: "Clients",
+    links: [
+      { href: "/", label: "Pipeline", icon: SquareKanban, match: (p: string) => p === "/" },
+      { href: "/clients", label: "Clients", icon: Users, match: (p: string) => p.startsWith("/clients") && !p.endsWith("/dashboard") },
+    ],
+  },
+  {
+    heading: "Get leads",
+    links: [
+      { href: "/funnels", label: "Pages & funnels", icon: LayoutTemplate, match: (p: string) => p.startsWith("/funnels") },
+      { href: "/forms", label: "Forms", icon: ClipboardList, match: (p: string) => p.startsWith("/forms") },
+      { href: "/bookings", label: "Bookings", icon: CalendarDays, match: (p: string) => p.startsWith("/bookings") },
+    ],
+  },
+  {
+    heading: "Ads",
+    links: [
+      { href: "/dashboards", label: "Dashboards", icon: ChartColumn, match: (p: string) => p.startsWith("/dashboards") || p.endsWith("/dashboard") },
+      { href: "/ad-accounts", label: "Ad accounts", icon: Plug, match: (p: string) => p.startsWith("/ad-accounts") },
+    ],
+  },
 ];
 
 function NavLinks({ pathname, onNavigate }: { pathname: string | null; onNavigate?: () => void }) {
   return (
-    <nav className="flex flex-col gap-1" aria-label="Main">
-      {NAV.map(({ href, label, icon: Icon, match }) => {
-        const active = pathname !== null && match(pathname);
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={onNavigate}
-            aria-current={active ? "page" : undefined}
-            className={cx(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-              active ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-            )}
-          >
-            <Icon className="size-4 shrink-0" aria-hidden />
-            {label}
-          </Link>
-        );
-      })}
+    <nav className="flex flex-col gap-5" aria-label="Main">
+      {NAV.map(({ heading, links }) => (
+        <div key={heading}>
+          <p className="mb-1 px-3 text-xs font-medium tracking-wide text-slate-400 uppercase">{heading}</p>
+          <div className="flex flex-col gap-1">
+            {links.map(({ href, label, icon: Icon, match }) => {
+              const active = pathname !== null && match(pathname);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={onNavigate}
+                  aria-current={active ? "page" : undefined}
+                  className={cx(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                    active ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                  )}
+                >
+                  <Icon className="size-4 shrink-0" aria-hidden />
+                  {label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   );
 }
@@ -85,7 +110,7 @@ export function Sidebar() {
         <div className="px-3">
           <Brand />
         </div>
-        <div className="mt-8 flex-1">
+        <div className="mt-8 min-h-0 flex-1 overflow-y-auto">
           <Nav />
         </div>
         <SignOut />
@@ -105,7 +130,7 @@ export function Sidebar() {
         </button>
       </div>
       {open && (
-        <div className="fixed inset-x-0 top-[57px] z-20 border-b border-slate-200 bg-white px-3 pt-2 pb-3 shadow-lg lg:hidden">
+        <div className="fixed inset-x-0 top-[57px] z-20 max-h-[calc(100dvh-57px)] overflow-y-auto border-b border-slate-200 bg-white px-3 pt-3 pb-3 shadow-lg lg:hidden">
           <Nav onNavigate={() => setOpen(false)} />
           <div className="mt-2 border-t border-slate-100 pt-2">
             <SignOut />

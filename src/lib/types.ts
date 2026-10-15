@@ -33,7 +33,10 @@ export type ActivityKind =
   | "email"
   | "meeting"
   | "ad_account_assigned"
-  | "ad_account_unassigned";
+  | "ad_account_unassigned"
+  | "form_submitted"
+  | "booking_created"
+  | "booking_cancelled";
 
 export type Activity = {
   id: string;
