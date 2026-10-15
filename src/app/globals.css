@@ -1,26 +1,33 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* HolmNordic — a calm fjord blue. */
+  --color-brand-50: #eef4f9;
+  --color-brand-100: #d7e5f0;
+  --color-brand-200: #b0cbe1;
+  --color-brand-500: #2f6a98;
+  --color-brand-600: #255883;
+  --color-brand-700: #1d4669;
+  --color-brand-900: #0f2638;
+
+  /* Platform colours (chart series). Validated pair: passes colour-blind separation checks. */
+  --color-meta: #2a78d6;
+  --color-google: #eb6834;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #f5f6f8;
+  color: #0f172a;
+}
+
+/* Number columns line up nicely. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
