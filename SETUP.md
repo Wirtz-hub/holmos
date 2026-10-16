@@ -309,6 +309,11 @@ For a whole website on the client's main domain (e.g. `kundensfirma.dk`):
 
 ## 7. Day-to-day use
 
+- **Lead finder:** type a trade and a town (any country), e.g. *tandlæge* + *Aarhus*. Each
+  business gets a score out of 100 for how much it looks like it needs help (no website, not
+  made for phones, no Meta pixel, few reviews…), best first. **Contact & email** finds who to
+  talk to and writes a first email; **Add to pipeline** puts them in *New* with everything
+  found in the notes. **CSV** downloads the list.
 - **Pipeline:** *Add lead*, then drag cards between New → Contacted → Qualified → Proposal → Won/Lost.
   Every move is logged in the client's activity automatically.
 - **Client page:** contact details, deal value, notes, and a log for calls, emails and meetings.
@@ -341,6 +346,28 @@ For a whole website on the client's main domain (e.g. `kundensfirma.dk`):
   or embed it on a website. Bookings show on the Bookings page and in the client's activity
   log; people can cancel with the link in their confirmation email, and you can cancel from
   the Bookings page.
+
+## 8. Lead finder: Google Maps (optional, recommended)
+
+The **Lead finder** works straight away using OpenStreetMap, which is free but knows fewer
+businesses, has no reviews, and is sometimes slow or busy. With a Google Maps key it finds
+almost every business, with phone, website and Google reviews, in a second or two.
+
+Google gives a free amount of map searches every month (one search gives up to 20
+businesses, so normal use stays free). It still needs a payment card on the project.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and pick the HolmOS
+   project you made for Google Calendar (it already has billing set up).
+2. *APIs & Services → Library*, search for **Places API (New)** and click **Enable**.
+3. *APIs & Services → Credentials → Create credentials → API key*. Copy it.
+4. Click the new key → **API restrictions → Restrict key** → tick **Places API (New)** → Save.
+5. Optional but wise: *Billing → Budgets & alerts*, make a budget of e.g. 50 kr. so Google
+   emails you long before anything costs money.
+6. Add the key to Vercel as `GOOGLE_MAPS_API_KEY`, then redeploy.
+
+**Contact & email** on a lead uses the same AI as the website writer (6c): it reads the
+business's website, finds the owner or manager if the site names them, and writes a short
+first email from you. Always read it before sending.
 
 ## Running it on your own computer (optional)
 

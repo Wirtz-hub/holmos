@@ -20,7 +20,7 @@ async function assertPublicHost(url: URL) {
   if (!addresses.length || addresses.some((a) => isPrivateAddress(a.address))) throw new WebsiteReadError("That address isn't a public website.");
 }
 
-async function fetchHtml(start: URL): Promise<{ url: URL; html: string }> {
+export async function fetchHtml(start: URL): Promise<{ url: URL; html: string }> {
   let url = start;
   for (let hop = 0; hop < 5; hop++) {
     await assertPublicHost(url);

@@ -32,6 +32,8 @@ export function serverEnv() {
     unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY ?? "",
     anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
     geminiApiKey: process.env.GEMINI_API_KEY ?? "",
+
+    googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY ?? "",
   };
 }
 

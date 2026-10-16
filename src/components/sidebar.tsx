@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, ChartColumn, ClipboardList, LayoutTemplate, LogOut, Menu, Plug, SquareKanban, Users, X } from "lucide-react";
+import { CalendarDays, ChartColumn, ClipboardList, LayoutTemplate, LogOut, Menu, Plug, Radar, SquareKanban, Users, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -18,6 +18,7 @@ const NAV = [
   {
     heading: "Get leads",
     links: [
+      { href: "/lead-finder", label: "Lead finder", icon: Radar, match: (p: string) => p.startsWith("/lead-finder") },
       { href: "/funnels", label: "Pages & funnels", icon: LayoutTemplate, match: (p: string) => p.startsWith("/funnels") },
       { href: "/forms", label: "Forms", icon: ClipboardList, match: (p: string) => p.startsWith("/forms") },
       { href: "/bookings", label: "Bookings", icon: CalendarDays, match: (p: string) => p.startsWith("/bookings") },
