@@ -31,7 +31,7 @@ async function Content({ params }: { params: PageProps<"/preview/funnels/[id]/[[
 
   return (
     <>
-      <div className="sticky top-0 z-50 flex flex-wrap items-center gap-x-4 gap-y-1 bg-amber-100 px-4 py-2 text-sm text-amber-950 shadow-sm">
+      <div className="relative z-50 flex flex-wrap items-center gap-x-4 gap-y-1 bg-amber-100 px-4 py-2 text-sm text-amber-950 shadow-sm">
         <Link href={`/funnels/${id}`} className="inline-flex items-center gap-1 font-medium hover:underline">
           <ArrowLeft className="size-4" aria-hidden /> Back to editing
         </Link>

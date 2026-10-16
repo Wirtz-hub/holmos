@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { ActivityLog } from "@/components/activity-log";
 import { ClientAdAccounts } from "@/components/client-ad-accounts";
 import { ClientForm } from "@/components/client-form";
+import { ClientMarketing } from "@/components/client-marketing";
 import { DeleteClientButton } from "@/components/delete-client-button";
 import { StageSelect } from "@/components/stage-select";
 import { ButtonLink, Card, CardHeader, PageHeader, PageSkeleton } from "@/components/ui";
@@ -93,6 +94,8 @@ async function ClientDetail({ params }: { params: PageProps<"/clients/[id]">["pa
           </Card>
 
           <ClientAdAccounts clientId={client.id} accounts={accounts} />
+
+          <ClientMarketing clientId={client.id} clientName={client.name} />
 
           <Card className="border-rose-100">
             <CardHeader

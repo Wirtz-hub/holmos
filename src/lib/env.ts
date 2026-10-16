@@ -28,6 +28,10 @@ export function serverEnv() {
     resendApiKey: process.env.RESEND_API_KEY ?? "",
     emailFrom: process.env.EMAIL_FROM ?? "",
     cronSecret: process.env.CRON_SECRET ?? "",
+
+    unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY ?? "",
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
+    geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   };
 }
 

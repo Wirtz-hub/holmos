@@ -18,6 +18,14 @@ const httpUrl = z
   .max(2000)
   .refine((value) => value === "" || /^https?:\/\/\S+$/i.test(value), "Start the link with https://");
 
+/** Icons people can put on a service. The names match lucide-react icons. */
+export const SERVICE_ICONS = [
+  "check", "star", "heart", "shield", "clock", "phone", "mail", "map-pin", "wrench", "hammer", "scissors", "sparkles",
+  "leaf", "home", "car", "dumbbell", "utensils", "coffee", "briefcase", "users", "calendar", "camera", "paintbrush",
+  "zap", "award", "smile", "stethoscope", "graduation-cap", "truck", "shopping-bag",
+] as const;
+export type ServiceIcon = (typeof SERVICE_ICONS)[number];
+
 const button = z.object({
   target: z.enum(["next", "form", "step", "url"]).default("next"),
   stepId: z.string().max(40).default(""),
@@ -35,7 +43,7 @@ export const blockSchema = z.discriminatedUnion("type", [
     buttonLabel: text(60),
     button: button.default({ target: "next", stepId: "", url: "" }),
     imageUrl: httpUrl.default(""),
-    layout: z.enum(["center", "split"]).default("center"),
+    layout: z.enum(["center", "split", "background"]).default("center"),
   }),
   z.object({
     id,
@@ -84,6 +92,98 @@ export const blockSchema = z.discriminatedUnion("type", [
     heading: text(200),
     text: text(1000),
   }),
+  z.object({
+    id,
+    type: z.literal("features"),
+    heading: text(200),
+    text: text(1000),
+    columns: z.union([z.literal(2), z.literal(3)]).default(3),
+    items: z
+      .array(z.object({ icon: z.enum(SERVICE_ICONS).default("check"), title: text(120), text: text(600) }))
+      .max(12)
+      .default([]),
+  }),
+  z.object({
+    id,
+    type: z.literal("split"),
+    heading: text(200),
+    text: text(3000),
+    imageUrl: httpUrl.default(""),
+    imageSide: z.enum(["left", "right"]).default("right"),
+    buttonLabel: text(60),
+    button: button.default({ target: "form", stepId: "", url: "" }),
+  }),
+  z.object({
+    id,
+    type: z.literal("faq"),
+    heading: text(200),
+    items: z
+      .array(z.object({ question: text(300), answer: text(2000) }))
+      .max(20)
+      .default([]),
+  }),
+  z.object({
+    id,
+    type: z.literal("pricing"),
+    heading: text(200),
+    text: text(1000),
+    plans: z
+      .array(
+        z.object({
+          name: text(80),
+          price: text(40),
+          period: text(40),
+          description: text(300),
+          features: text(2000),
+          buttonLabel: text(60),
+          button: button.default({ target: "form", stepId: "", url: "" }),
+          highlighted: z.boolean().default(false),
+        }),
+      )
+      .max(4)
+      .default([]),
+  }),
+  z.object({
+    id,
+    type: z.literal("team"),
+    heading: text(200),
+    text: text(1000),
+    people: z
+      .array(z.object({ name: text(120), role: text(120), photoUrl: httpUrl.default(""), bio: text(600) }))
+      .max(16)
+      .default([]),
+  }),
+  z.object({
+    id,
+    type: z.literal("contact"),
+    heading: text(200),
+    text: text(1000),
+    address: text(300),
+    phone: text(40),
+    email: text(200),
+    openingHours: text(600),
+    showMap: z.boolean().default(true),
+    formId: z.uuid().nullable().default(null),
+  }),
+  z.object({
+    id,
+    type: z.literal("gallery"),
+    heading: text(200),
+    columns: z.union([z.literal(2), z.literal(3), z.literal(4)]).default(3),
+    images: z
+      .array(z.object({ url: httpUrl.default(""), alt: text(300) }))
+      .max(24)
+      .default([]),
+  }),
+  z.object({
+    id,
+    type: z.literal("stats"),
+    heading: text(200),
+    items: z
+      .array(z.object({ value: text(20), label: text(120) }))
+      .max(6)
+      .default([]),
+  }),
 ]);
 export type Block = z.infer<typeof blockSchema>;
 export type BlockType = Block["type"];
@@ -97,6 +197,8 @@ export const stepSchema = z.object({
   slug: z.string().regex(STEP_SLUG, "Use lowercase letters, numbers and dashes").max(60),
   seoTitle: text(120),
   seoDescription: text(300),
+  /** Shown in the website menu (when the page has one). */
+  inMenu: z.boolean().default(true),
   blocks: z.array(blockSchema).max(40, "A step can have up to 40 blocks"),
 });
 export type Step = z.infer<typeof stepSchema>;
@@ -110,12 +212,44 @@ export const themeSchema = z.object({
 });
 export type Theme = z.infer<typeof themeSchema>;
 
+/** A menu along the top and a footer along the bottom: what turns a landing page into a website. */
+export const siteSchema = z.object({
+  header: z
+    .object({
+      enabled: z.boolean().default(false),
+      businessName: text(120),
+      logoUrl: httpUrl.default(""),
+      buttonLabel: text(60),
+      button: button.default({ target: "form", stepId: "", url: "" }),
+    })
+    .default({ enabled: false, businessName: "", logoUrl: "", buttonLabel: "", button: { target: "form", stepId: "", url: "" } }),
+  footer: z
+    .object({
+      enabled: z.boolean().default(false),
+      text: text(1000),
+      phone: text(40),
+      email: text(200),
+    })
+    .default({ enabled: false, text: "", phone: "", email: "" }),
+});
+export type Site = z.infer<typeof siteSchema>;
+
+/** Unsplash asks for the photographer to be credited wherever their photo is used. */
+export const photoCreditSchema = z.object({
+  url: z.string().max(2000),
+  name: text(120),
+  link: httpUrl.default(""),
+});
+export type PhotoCredit = z.infer<typeof photoCreditSchema>;
+
 export const funnelDocSchema = z
   .object({
     version: z.literal(1).default(1),
     language: z.enum(["da", "en"]).default("da"),
     indexable: z.boolean().default(true),
     theme: themeSchema.default({ accent: "#1d4669", background: "white", font: "sans" }),
+    site: siteSchema.default(siteSchema.parse({})),
+    photoCredits: z.array(photoCreditSchema).max(200).default([]),
     steps: z.array(stepSchema).min(1, "A page needs at least one step").max(10, "A funnel can have up to 10 steps"),
   })
   .refine((doc) => new Set(doc.steps.map((s) => s.slug)).size === doc.steps.length, {
@@ -132,6 +266,14 @@ export const BLOCK_LABELS: Record<BlockType, { label: string; hint: string }> = 
   cta: { label: "Call to action", hint: "A short nudge with a button" },
   testimonials: { label: "Testimonials", hint: "Quotes from happy clients" },
   booking: { label: "Booking", hint: "Let visitors book a time with you" },
+  features: { label: "Services", hint: "What you offer, in a grid with icons" },
+  split: { label: "Text and image", hint: "A picture beside some text" },
+  faq: { label: "Questions", hint: "Frequently asked questions that fold out" },
+  pricing: { label: "Prices", hint: "Packages side by side" },
+  team: { label: "Team", hint: "The people, with photos" },
+  contact: { label: "Contact", hint: "Address, phone, opening hours, map and a form" },
+  gallery: { label: "Gallery", hint: "A grid of pictures" },
+  stats: { label: "Key figures", hint: "A few numbers that impress" },
 };
 
 export function newId() {
@@ -181,11 +323,97 @@ export function newBlock(type: BlockType, language: Language = "da"): Block {
       };
     case "booking":
       return { ...base, type, calendarId: null, heading: da ? "Book en tid" : "Book a time", text: "" };
+    case "features":
+      return {
+        ...base,
+        type,
+        heading: da ? "Det tilbyder vi" : "What we offer",
+        text: "",
+        columns: 3,
+        items: [1, 2, 3].map((n) => ({
+          icon: "check" as const,
+          title: da ? `Ydelse ${n}` : `Service ${n}`,
+          text: da ? "En kort beskrivelse af ydelsen." : "A short description of the service.",
+        })),
+      };
+    case "split":
+      return {
+        ...base,
+        type,
+        heading: da ? "Om os" : "About us",
+        text: da ? "Fortæl kort, hvem I er, og hvad der gør jer gode til det, I laver." : "Say who you are and what makes you good at what you do.",
+        imageUrl: "",
+        imageSide: "right",
+        buttonLabel: "",
+        button: { target: "form", stepId: "", url: "" },
+      };
+    case "faq":
+      return {
+        ...base,
+        type,
+        heading: da ? "Ofte stillede spørgsmål" : "Frequently asked questions",
+        items: [
+          { question: da ? "Hvad koster det?" : "What does it cost?", answer: da ? "Skriv svaret her." : "Write the answer here." },
+          { question: da ? "Hvor hurtigt kan I starte?" : "How soon can you start?", answer: da ? "Skriv svaret her." : "Write the answer here." },
+        ],
+      };
+    case "pricing":
+      return {
+        ...base,
+        type,
+        heading: da ? "Priser" : "Prices",
+        text: "",
+        plans: [
+          { name: "Basis", highlighted: false, price: da ? "499 kr." : "€69" },
+          { name: "Plus", highlighted: true, price: da ? "999 kr." : "€139" },
+        ].map((plan) => ({
+          ...plan,
+          period: da ? "pr. måned" : "per month",
+          description: "",
+          features: da ? "- Det første, der er med\n- Det andet, der er med" : "- The first thing included\n- The second thing included",
+          buttonLabel: da ? "Vælg" : "Choose",
+          button: { target: "form" as const, stepId: "", url: "" },
+        })),
+      };
+    case "team":
+      return {
+        ...base,
+        type,
+        heading: da ? "Mød holdet" : "Meet the team",
+        text: "",
+        people: [1, 2].map(() => ({ name: da ? "Navn Efternavn" : "Full Name", role: da ? "Titel" : "Role", photoUrl: "", bio: "" })),
+      };
+    case "contact":
+      return {
+        ...base,
+        type,
+        heading: da ? "Kontakt os" : "Get in touch",
+        text: "",
+        address: "",
+        phone: "",
+        email: "",
+        openingHours: da ? "Mandag–fredag: 9–16\nLørdag–søndag: Lukket" : "Monday–Friday: 9–16\nSaturday–Sunday: Closed",
+        showMap: true,
+        formId: null,
+      };
+    case "gallery":
+      return { ...base, type, heading: "", columns: 3, images: [] };
+    case "stats":
+      return {
+        ...base,
+        type,
+        heading: "",
+        items: [
+          { value: "10+", label: da ? "års erfaring" : "years of experience" },
+          { value: "500", label: da ? "tilfredse kunder" : "happy clients" },
+          { value: "4,9", label: da ? "i gennemsnit på Google" : "average on Google" },
+        ],
+      };
   }
 }
 
 export function newStep(name: string, slug: string, blocks: Block[] = []): Step {
-  return { id: newId(), name, slug, seoTitle: "", seoDescription: "", blocks };
+  return { id: newId(), name, slug, seoTitle: "", seoDescription: "", inMenu: true, blocks };
 }
 
 /** Turns "Spring offer 2026!" into "spring-offer-2026". */
@@ -203,12 +431,31 @@ export function slugify(value: string) {
     .replace(/-+$/g, "");
 }
 
+/** The address of a step: the first one is the page's main address. */
+export function stepHref(doc: Pick<FunnelDoc, "steps">, index: number, basePath: string) {
+  if (index <= 0) return basePath || "/";
+  return `${basePath}/${doc.steps[index].slug}`;
+}
+
+/** Every picture address used anywhere in the page (for photo credits). */
+export function usedImageUrls(doc: Pick<FunnelDoc, "steps" | "site">) {
+  const urls = new Set<string>();
+  const add = (url: string) => url && urls.add(url);
+  add(doc.site.header.logoUrl);
+  for (const step of doc.steps) {
+    for (const block of step.blocks) {
+      if (block.type === "hero" || block.type === "split") add(block.imageUrl);
+      if (block.type === "image") add(block.url);
+      if (block.type === "team") block.people.forEach((p) => add(p.photoUrl));
+      if (block.type === "gallery") block.images.forEach((i) => add(i.url));
+    }
+  }
+  return urls;
+}
+
 /** Where a button goes. `basePath` is "/f/<slug>" on the app's own address, "" on a custom domain. */
 export function buttonHref(doc: Pick<FunnelDoc, "steps">, stepIndex: number, target: ButtonTarget, basePath: string): string {
-  const stepPath = (index: number) => {
-    if (index <= 0) return basePath || "/";
-    return `${basePath}/${doc.steps[index].slug}`;
-  };
+  const stepPath = (index: number) => stepHref(doc, index, basePath);
   switch (target.target) {
     case "url":
       return target.url || "#";
@@ -242,7 +489,7 @@ export function referencedIds(doc: FunnelDoc) {
   const calendars = new Set<string>();
   for (const step of doc.steps) {
     for (const block of step.blocks) {
-      if (block.type === "form" && block.formId) forms.add(block.formId);
+      if ((block.type === "form" || block.type === "contact") && block.formId) forms.add(block.formId);
       if (block.type === "booking" && block.calendarId) calendars.add(block.calendarId);
     }
   }

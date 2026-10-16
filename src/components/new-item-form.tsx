@@ -2,6 +2,7 @@
 
 import { Plus } from "lucide-react";
 import { startTransition, useActionState, useState } from "react";
+import { OwnerSelect, type ClientOption } from "@/components/owner-select";
 import { Button, inputClass } from "@/components/ui";
 import type { FormState } from "@/lib/actions/clients";
 
@@ -11,11 +12,14 @@ export function NewItemForm({
   buttonLabel,
   placeholder,
   withLanguage,
+  clients,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   buttonLabel: string;
   placeholder: string;
   withLanguage?: boolean;
+  /** When given, also asks who the new item belongs to. */
+  clients?: ClientOption[];
 }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState(action, null);
@@ -46,6 +50,14 @@ export function NewItemForm({
         <input id="new-item-name" name="name" required autoFocus maxLength={120} placeholder={placeholder} className={inputClass} />
         {error && <p className="mt-1 text-sm text-rose-600">{error}</p>}
       </div>
+      {clients && (
+        <div className="w-full sm:w-auto sm:min-w-64">
+          <label htmlFor="new-item-owner" className="sr-only">
+            Belongs to
+          </label>
+          <OwnerSelect id="new-item-owner" clients={clients} />
+        </div>
+      )}
       {withLanguage && (
         <select name="language" defaultValue="da" aria-label="Language visitors see" className={`${inputClass} w-32!`}>
           <option value="da">Danish</option>

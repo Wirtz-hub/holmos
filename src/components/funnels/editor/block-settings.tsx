@@ -3,21 +3,36 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { ButtonTargetInput, ImageInput, Select, TextArea, TextInput } from "@/components/funnels/editor/controls";
-import { BLOCK_LABELS, type Block, type BlockOf, type Step } from "@/lib/funnels/schema";
+import {
+  ContactSettings,
+  FaqSettings,
+  FeaturesSettings,
+  GallerySettings,
+  PricingSettings,
+  SplitSettings,
+  StatsSettings,
+  TeamSettings,
+} from "@/components/funnels/editor/website-block-settings";
+import { BLOCK_LABELS, type Block, type BlockOf, type PhotoCredit, type Step } from "@/lib/funnels/schema";
 
 // The settings panel for whichever block is selected in the page editor.
 
-export type EditorForm = { id: string; name: string; is_active: boolean };
+export type EditorForm = { id: string; name: string; is_active: boolean; client_id: string | null };
 export type EditorCalendar = { id: string; name: string; is_active: boolean };
 
-type Props<T extends Block["type"]> = {
+export type BlockSettingsProps<T extends Block["type"]> = {
   block: BlockOf<T>;
   onChange: (block: BlockOf<T>) => void;
   steps: Step[];
   stepIndex: number;
   forms: EditorForm[];
   calendars: EditorCalendar[];
+  /** Who the page belongs to, to spot a form that sends people somewhere else. */
+  owner: { clientId: string | null; clients: { id: string; name: string }[] };
+  /** Records who took a stock photo, so the page can credit them. */
+  onCredit: (credit: PhotoCredit) => void;
 };
+type Props<T extends Block["type"]> = BlockSettingsProps<T>;
 
 const TEXT_HINT = "Leave an empty line between paragraphs. Start lines with “- ” for a bullet list.";
 
@@ -36,11 +51,19 @@ export function BlockSettings(props: Props<Block["type"]>) {
       {block.type === "cta" && <CtaSettings {...(props as Props<"cta">)} />}
       {block.type === "testimonials" && <TestimonialSettings {...(props as Props<"testimonials">)} />}
       {block.type === "booking" && <BookingSettings {...(props as Props<"booking">)} />}
+      {block.type === "features" && <FeaturesSettings {...(props as Props<"features">)} />}
+      {block.type === "split" && <SplitSettings {...(props as Props<"split">)} />}
+      {block.type === "faq" && <FaqSettings {...(props as Props<"faq">)} />}
+      {block.type === "pricing" && <PricingSettings {...(props as Props<"pricing">)} />}
+      {block.type === "team" && <TeamSettings {...(props as Props<"team">)} />}
+      {block.type === "contact" && <ContactSettings {...(props as Props<"contact">)} />}
+      {block.type === "gallery" && <GallerySettings {...(props as Props<"gallery">)} />}
+      {block.type === "stats" && <StatsSettings {...(props as Props<"stats">)} />}
     </div>
   );
 }
 
-function HeroSettings({ block, onChange, steps, stepIndex }: Props<"hero">) {
+function HeroSettings({ block, onChange, steps, stepIndex, onCredit }: Props<"hero">) {
   const set = (patch: Partial<BlockOf<"hero">>) => onChange({ ...block, ...patch });
   return (
     <>
@@ -49,7 +72,7 @@ function HeroSettings({ block, onChange, steps, stepIndex }: Props<"hero">) {
       <TextArea label="Text under the headline" value={block.text} onChange={(text) => set({ text })} hint={TEXT_HINT} maxLength={1000} />
       <TextInput label="Button text" value={block.buttonLabel} onChange={(buttonLabel) => set({ buttonLabel })} hint="Leave empty for no button." maxLength={60} />
       {block.buttonLabel && <ButtonTargetInput value={block.button} onChange={(button) => set({ button })} steps={steps} stepIndex={stepIndex} />}
-      <ImageInput label="Picture" value={block.imageUrl} onChange={(imageUrl) => set({ imageUrl })} hint="Optional. Landscape pictures work best." />
+      <ImageInput label="Picture" value={block.imageUrl} onChange={(imageUrl) => set({ imageUrl })} onCredit={onCredit} hint="Optional. Landscape pictures work best." />
       {block.imageUrl && (
         <Select
           label="Layout"
@@ -58,6 +81,7 @@ function HeroSettings({ block, onChange, steps, stepIndex }: Props<"hero">) {
           options={[
             { id: "center", label: "Centred, picture below" },
             { id: "split", label: "Text left, picture right" },
+            { id: "background", label: "Picture behind the text" },
           ]}
         />
       )}
@@ -84,11 +108,11 @@ function TextSettings({ block, onChange }: Props<"text">) {
   );
 }
 
-function ImageSettings({ block, onChange }: Props<"image">) {
+function ImageSettings({ block, onChange, onCredit }: Props<"image">) {
   const set = (patch: Partial<BlockOf<"image">>) => onChange({ ...block, ...patch });
   return (
     <>
-      <ImageInput label="Picture" value={block.url} onChange={(url) => set({ url })} />
+      <ImageInput label="Picture" value={block.url} onChange={(url) => set({ url })} onCredit={onCredit} />
       <TextInput label="Describe the picture" value={block.alt} onChange={(alt) => set({ alt })} hint="Read aloud to blind visitors, and used by Google." maxLength={300} />
       <TextInput label="Caption" value={block.caption} onChange={(caption) => set({ caption })} hint="Optional" maxLength={300} />
       <Select
@@ -105,16 +129,22 @@ function ImageSettings({ block, onChange }: Props<"image">) {
   );
 }
 
-function FormSettings({ block, onChange, forms, steps, stepIndex }: Props<"form">) {
+function FormSettings({ block, onChange, forms, steps, stepIndex, owner }: Props<"form">) {
   const set = (patch: Partial<BlockOf<"form">>) => onChange({ ...block, ...patch });
   const isLast = stepIndex === steps.length - 1;
+  const ownerName = (clientId: string | null) => (clientId ? (owner.clients.find((c) => c.id === clientId)?.name ?? "a client") : "HolmNordic");
+  const chosen = forms.find((f) => f.id === block.formId);
+  const mismatch = chosen && (chosen.client_id ?? null) !== (owner.clientId ?? null);
   return (
     <>
       <Select
         label="Which form"
         value={block.formId ?? ""}
         onChange={(formId) => set({ formId: formId || null })}
-        options={[{ id: "", label: "Choose a form…" }, ...forms.map((f) => ({ id: f.id, label: f.is_active ? f.name : `${f.name} (switched off)` }))]}
+        options={[
+          { id: "", label: "Choose a form…" },
+          ...forms.map((f) => ({ id: f.id, label: `${f.name} · ${ownerName(f.client_id)}${f.is_active ? "" : " (switched off)"}` })),
+        ]}
         hint={
           <>
             Change its questions on the{" "}
@@ -125,6 +155,13 @@ function FormSettings({ block, onChange, forms, steps, stepIndex }: Props<"form"
           </>
         }
       />
+      {mismatch && (
+        <p className="rounded-lg bg-amber-50 p-3 text-xs text-amber-900">
+          This page belongs to <strong>{ownerName(owner.clientId)}</strong>, but answers to this form go to{" "}
+          <strong>{chosen.client_id ? `the contact list of ${ownerName(chosen.client_id)}` : "your own pipeline"}</strong>. Pick a form that
+          belongs to the same one, or change who the form belongs to on the Forms page.
+        </p>
+      )}
       <TextInput label="Heading" value={block.heading} onChange={(heading) => set({ heading })} hint="Optional" maxLength={200} />
       <TextArea label="Text" rows={2} value={block.text} onChange={(text) => set({ text })} hint="Optional" maxLength={1000} />
       <Select

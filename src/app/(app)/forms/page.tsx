@@ -20,15 +20,17 @@ export default function FormsPage() {
 
 async function Forms() {
   const { supabase } = await requireAdmin();
-  const [formsResult, latestResult] = await Promise.all([
-    supabase.from("forms").select("id, name, is_active, updated_at, form_submissions(count)").order("name"),
+  const [formsResult, latestResult, clientsResult] = await Promise.all([
+    supabase.from("forms").select("id, name, is_active, updated_at, clients(name), form_submissions(count)").order("name"),
     supabase.from("form_submissions").select("form_id, created_at").order("created_at", { ascending: false }).limit(500),
+    supabase.from("clients").select("id, name").order("name"),
   ]);
   if (formsResult.error) throw new Error(formsResult.error.message);
   const latest = new Map<string, string>();
   for (const row of latestResult.data ?? []) if (!latest.has(row.form_id)) latest.set(row.form_id, row.created_at);
-  const forms = (formsResult.data ?? []).map(({ form_submissions, ...form }) => ({
+  const forms = (formsResult.data ?? []).map(({ form_submissions, clients, ...form }) => ({
     ...form,
+    owner: (clients as unknown as { name: string } | null)?.name ?? null,
     answers: (form_submissions as { count: number }[] | null)?.[0]?.count ?? 0,
   }));
 
@@ -36,10 +38,16 @@ async function Forms() {
     <>
       <PageHeader
         title="Forms"
-        description="Use them on your pages or on any website. Every answer becomes a lead in your pipeline, or updates the client if they're already there."
+        description="Use them on your pages or on any website. Answers to your own forms become leads in your pipeline; answers to a client's form go on that client's contact list."
       />
       <div className="mb-6">
-        <NewItemForm action={createFormAction} buttonLabel="New form" placeholder="e.g. Contact form" withLanguage />
+        <NewItemForm
+          action={createFormAction}
+          buttonLabel="New form"
+          placeholder="e.g. Contact form"
+          withLanguage
+          clients={(clientsResult.data ?? []) as { id: string; name: string }[]}
+        />
       </div>
       {forms.length === 0 ? (
         <Card>
@@ -56,6 +64,7 @@ async function Forms() {
                   {form.name}
                 </Link>
                 <p className="mt-0.5 text-xs text-slate-500">
+                  {form.owner ? `For ${form.owner} · ` : ""}
                   {form.answers === 1 ? "1 answer" : `${form.answers} answers`}
                   {latest.get(form.id) && ` · latest ${formatDateTime(latest.get(form.id)!)}`}
                 </p>

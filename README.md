@@ -32,11 +32,29 @@ AgencyAnalytics and AgencyFlow. One admin login today; built so client logins ca
   events (with Meet links). Confirmation, cancellation and reminder emails via Resend; a
   daily Vercel cron job sends reminders.
 
+## What's built (Phase 3, part 1: websites for clients)
+
+- **Client contact lists** — a page or form can belong to a client. Answers then go to that
+  client's own contact list (deduplicated by email, then phone, with a per-contact history and
+  an Excel/CSV download) instead of HolmNordic's pipeline.
+- **Website blocks** — services, text-and-picture, questions, prices, team, contact (with
+  directions link and form), gallery and key figures, plus a site menu and footer, so a
+  multi-step page works as a multi-page website.
+- **Website templates** — twelve four-page sites (front page, services, about, contact) with
+  Danish copy for common trades.
+- **Stock photos** — Unsplash search in the editor; templates and AI sites get pictures
+  automatically, with photographer credits in the footer.
+- **AI website writer** — Claude (Anthropic SDK, `claude-opus-5-5`, structured output) or
+  Gemini (REST, free tier), chosen per site. Optionally reads the client's current website
+  (public addresses only, size- and time-limited). The AI only writes content; layout comes
+  from the same builder as the templates.
+
 ## Roadmap
 
 1. ~~CRM + ad dashboards~~
 2. ~~Funnels, landing pages, forms, booking calendars~~
-3. Email/SMS broadcasts, drip sequences, tagging, visual workflow builder
+3. Websites and contact lists for clients (done); email/SMS broadcasts, drip sequences,
+   tagging, visual workflow builder
 4. Google review requests and monitoring; Stripe invoices and payment links
 5. Unified inbox (Instagram DM, SMS, email) with AI agent; courses; surveys; social planner
 
@@ -65,7 +83,9 @@ Supabase (Postgres + Auth), Recharts, dnd-kit. Hosted on Vercel.
 | `src/proxy.ts` | Session refresh + redirect to `/login`; public paths; custom domains → `/sites/<domain>` |
 | `src/lib/auth.ts` | `requireAdmin()` — every page, server action and API route calls it first |
 | `src/lib/actions/` | Server actions (clients, ad accounts, auth, funnels, forms, booking) |
-| `src/lib/funnels/`, `src/lib/forms/`, `src/lib/booking/` | Page blocks and templates, form questions and answer checks, free-time calculation, booking emails |
+| `src/lib/funnels/`, `src/lib/forms/`, `src/lib/booking/` | Page blocks, landing and website templates, form questions and answer checks, free-time calculation, booking emails |
+| `src/lib/ai/` | AI website writer: reading a client's website, the instructions and answer format, Claude and Gemini calls |
+| `src/lib/unsplash.ts` | Stock photo search, credits and placeholder pictures |
 | `src/lib/public-data.ts` | What public pages read (published content only, cached, refreshed on publish) |
 | `src/app/f/`, `src/app/sites/`, `src/app/book/`, `src/app/embed/`, `src/app/api/public/` | **Public** pages and endpoints — the only routes without `requireAdmin()` |
 | `src/app/api/cron/reminders/` | Daily reminder job (checks `CRON_SECRET`); scheduled in `vercel.json` |
@@ -89,6 +109,10 @@ Supabase (Postgres + Auth), Recharts, dnd-kit. Hosted on Vercel.
   their blocked time (meeting plus buffers) under an exclusion constraint, so two confirmed
   bookings can never overlap.
 - `calendar_connections` — the one Google Calendar login; tokens handled like `ad_connections`.
+- `contacts` / `contact_events` — each client's own contact list and its history. Funnels and
+  forms have an optional `client_id`; answers to a client's form go through `upsert_contact()`
+  instead of `upsert_lead()`. Readable through `can_view_client()`, so future client logins
+  see only their own contacts.
 - **Visitors** (the `anon` role) can't read any of these tables. They get published content
   through `published_funnel()`, `published_funnel_for_domain()`, `public_form()` and
   `public_booking_calendar()`. Answers and bookings go through the server, which calls

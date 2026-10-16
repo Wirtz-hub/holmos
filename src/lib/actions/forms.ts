@@ -14,11 +14,16 @@ const idSchema = z.uuid();
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** "" (your own) or a client's id. */
+const ownerSchema = z.union([z.uuid(), z.literal("")]).transform((value) => value || null);
+
 export async function createFormAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const { supabase, email } = await requireAdmin();
   const name = String(formData.get("name") ?? "").trim();
   const language = formData.get("language") === "en" ? "en" : "da";
+  const owner = ownerSchema.safeParse(String(formData.get("client_id") ?? ""));
   if (!name) return { ok: false, fieldErrors: { name: "Give the form a name" } };
+  if (!owner.success) return { ok: false, message: "Unknown client." };
 
   const { data, error } = await supabase
     .from("forms")
@@ -28,6 +33,7 @@ export async function createFormAction(_prev: FormState, formData: FormData): Pr
       language,
       success_message: language === "da" ? "Tak! Vi vender tilbage hurtigst muligt." : "Thank you! We'll be in touch soon.",
       notify_email: email || null,
+      client_id: owner.data,
     })
     .select("id")
     .single();
@@ -55,6 +61,7 @@ const formSchema = z.object({
     .refine((value) => value === "" || EMAIL.test(value), "That email address doesn't look right")
     .transform((value) => value || null),
   is_active: z.boolean(),
+  client_id: ownerSchema,
 });
 
 export type FormInput = z.input<typeof formSchema>;

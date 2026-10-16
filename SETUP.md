@@ -49,7 +49,7 @@ them all.
    `APP_URL` (no slash at the end). Then *Deployments → ⋯ → Redeploy* so it takes effect.
 5. Open the address and sign in. You should see an empty pipeline. 🎉
 
-> Later, if you use your own domain (e.g. `os.holmnordic.dk`), update `APP_URL` and the
+> Later, if you use your own domain (e.g. `os.holmnordic.com`), update `APP_URL` and the
 > redirect addresses in steps 3 and 4 below.
 
 ## 3. Connect Meta Ads
@@ -153,11 +153,14 @@ HolmOS sends email through [Resend](https://resend.com). Its free plan is plenty
 Without it, everything still works — people just don't get emails.
 
 1. Sign up at [resend.com](https://resend.com).
-2. *Domains → Add Domain*. Use a **sub-domain** such as `mail.holmnordic.dk`, so your normal
+2. *Domains → Add Domain*. Use a **sub-domain** such as `mail.holmnordic.com`, so your normal
    email isn't affected. Pick the **EU (Ireland)** region.
-3. Resend shows a handful of DNS records (MX and TXT). Add each one where holmnordic.dk's DNS
-   is managed (e.g. Simply.com or One.com → DNS). Back in Resend press **Verify**. It can take
-   up to an hour to turn green.
+3. Resend shows three DNS records (one TXT, two CNAME). holmnordic.com's DNS is at
+   **Simply.com**: log in, open holmnordic.com → **DNS**, and for each record press
+   **Tilføj DNS record**. Pick the **Type**, put Resend's **Name** in **Navn** (Simply adds
+   `holmnordic.com` itself) and Resend's **Content** in **Værdi** — clicking a value in Resend
+   copies it. Leave TTL as it is. Back in Resend press **I've added the records**. It can take
+   up to an hour to turn green. Leave **Enable Receiving** off.
 4. *API Keys → Create API Key*: name "HolmOS", permission **Sending access**, and choose the
    domain from step 2. Copy the key — Resend only shows it once.
 5. Add to Vercel and redeploy:
@@ -165,7 +168,7 @@ Without it, everything still works — people just don't get emails.
    | Setting | Value |
    |---|---|
    | `RESEND_API_KEY` | The key from step 4 (starts with `re_`) |
-   | `EMAIL_FROM` | Who emails come from, e.g. `HolmNordic <booking@mail.holmnordic.dk>` — the part after @ must be the domain from step 2 |
+   | `EMAIL_FROM` | Who emails come from, e.g. `HolmNordic <booking@mail.holmnordic.com>` — the part after @ must be the domain from step 2 |
 
 The **Bookings** page shows whether emails are on.
 
@@ -228,7 +231,83 @@ Each page can also live on its own domain, like `tilbud.yourclient.dk`. The page
 
 On that domain only the page is reachable — never your HolmOS login or client data.
 
-## 6. Day-to-day use
+## 6. Websites and contact lists for clients
+
+HolmOS can build a whole website for a client — from a ready-made template or written by AI
+— and the people who fill in its forms go to **that client's own contact list**, not your
+pipeline.
+
+### 6a. Update the database
+
+1. Open `supabase/migrations/0003_client_contacts.sql` in Notepad, press **Ctrl+A**, then
+   **Ctrl+C**.
+2. In Supabase open *SQL Editor → New query*, click in the empty box, press **Ctrl+V**, then
+   **Run**. It should say "Success. No rows returned".
+
+Run it **once**, like 5a. Until it has run, pages and forms can't be created.
+
+### 6b. Free stock photos (Unsplash)
+
+Website templates and the AI pick pictures from [Unsplash](https://unsplash.com), and the
+page editor gets a **Find** button for searching photos. Free; the photographer is credited
+at the bottom of the page automatically. Without it, websites start without pictures and you
+upload your own.
+
+1. Sign up at [unsplash.com/join](https://unsplash.com/join).
+2. Open [unsplash.com/oauth/applications](https://unsplash.com/oauth/applications) →
+   **New Application**, tick the boxes to accept the API rules, and name it "HolmOS".
+3. On the application's page, scroll to **Keys** and copy the **Access Key** (not the Secret key).
+4. Add to Vercel and redeploy:
+
+   | Setting | Value |
+   |---|---|
+   | `UNSPLASH_ACCESS_KEY` | The Access Key |
+
+A new application may make 50 photo requests an hour — enough for about three new websites
+an hour plus searching. When HolmOS is in use, press **Apply for production** on the same page
+(free) to raise it to 1,000 an hour.
+
+### 6c. AI that writes websites (Gemini and/or Claude)
+
+**Write it with AI** under *Pages & funnels → New page* writes a made-to-measure website from a
+short description and, if there is one, the client's current website. You choose the AI each
+time. Set up one or both:
+
+**Gemini (Google) — free.** Google's free tier has a daily limit and Google may use what you
+send to improve its products, so don't paste private customer information.
+
+1. Go to [aistudio.google.com](https://aistudio.google.com) and sign in with your Google account.
+2. Click **Get API key → Create API key**. Create it in a **new project** — not the HolmOS
+   project you made for Google Calendar, which has a payment card on it (keys there are billed).
+3. Copy the key and add it to Vercel as `GEMINI_API_KEY`, then redeploy.
+
+**Claude (Anthropic) — paid, best writing.** About 1–3 kr. per website. This is separate from
+a Claude.ai subscription.
+
+1. Sign up at [console.anthropic.com](https://console.anthropic.com).
+2. *Billing*: add a card and buy credit (the smallest amount is plenty to start).
+3. *API keys → Create key*, name it "HolmOS", and copy it — it's only shown once.
+4. Add it to Vercel as `ANTHROPIC_API_KEY`, then redeploy.
+
+The AI only uses facts you give it or that are on the client's current website. It doesn't
+invent reviews, prices or numbers; sections it has nothing for are left out. Always read the
+text through before you publish.
+
+### 6d. Putting a website on the client's domain
+
+For a whole website on the client's main domain (e.g. `kundensfirma.dk`):
+
+1. In the page's **Address & domain** tab, type `kundensfirma.dk` and save.
+2. In Vercel: *Settings → Domains → Add Domain*, add `kundensfirma.dk` and choose to also add
+   `www.kundensfirma.dk` redirecting to it.
+3. Where the client's domain is registered (Simply.com, One.com, GoDaddy…): change the **A**
+   record for the domain itself (`@`) to `76.76.21.21`, and set **www** as a **CNAME** to
+   `cname.vercel-dns.com`. Delete any other A records for `@`. **Don't touch the MX records**
+   — they carry the client's email.
+4. When Vercel shows "Valid Configuration", the website is live there with https. The old
+   website stops showing as soon as the DNS change arrives, so publish first.
+
+## 7. Day-to-day use
 
 - **Pipeline:** *Add lead*, then drag cards between New → Contacted → Qualified → Proposal → Won/Lost.
   Every move is logged in the client's activity automatically.
@@ -243,6 +322,12 @@ On that domain only the page is reachable — never your HolmOS login or client 
   *What Meta/Google reported* to see exactly which conversions were counted. Under
   *Advanced result settings* on the client page you can point Meta at a custom conversion,
   or tell Google to count every conversion.
+- **Websites for clients:** *Pages & funnels → New page → Website* (pick the trade) or
+  **Write it with AI**. Set **Belongs to** to the client. You get four pages with a menu and
+  footer; change words and pictures like any page, then put it on their domain (6d).
+- **A client's contacts:** everyone who fills in a form on a page that belongs to a client
+  lands on *Clients → the client → Contacts*, with what they wrote. **Download for Excel**
+  gives the whole list. Pages and forms that belong to you still go to your pipeline.
 - **Pages & funnels:** *New page*, pick a template, then change the words and pictures. Drag
   blocks from the left onto the page, click a block to edit it, and add steps for a multi-step
   funnel. Changes save by themselves, but visitors only see them after you press **Publish**.

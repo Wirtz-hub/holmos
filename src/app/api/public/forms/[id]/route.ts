@@ -54,13 +54,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   if (form.notify_email) {
-    const clientId = (data as { client_id: string }).client_id;
-    const lines = [
-      ...checked.answers.map((a) => `${a.label}: ${a.value}`),
-      "",
-      sourceUrl ? `Sent from: ${sourceUrl}` : "",
-      `Client record: ${appAddress(`/clients/${clientId}`)}`,
-    ].filter((line, i) => line !== "" || i === checked.answers.length);
+    // Your own forms link to the client record; a client's forms to the person on their contact list.
+    const saved = data as { client_id: string | null; contact_id: string | null; owner_client_id: string | null };
+    const record =
+      saved.contact_id && saved.owner_client_id
+        ? `Contact: ${appAddress(`/clients/${saved.owner_client_id}/contacts#contact-${saved.contact_id}`)}`
+        : `Client record: ${appAddress(`/clients/${saved.client_id}`)}`;
+    const lines = [...checked.answers.map((a) => `${a.label}: ${a.value}`), "", sourceUrl ? `Sent from: ${sourceUrl}` : "", record].filter(
+      (line, i) => line !== "" || i === checked.answers.length,
+    );
     const who = checked.contact.name ?? checked.contact.email ?? checked.contact.phone ?? "Someone";
     after(() =>
       sendEmail({

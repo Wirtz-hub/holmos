@@ -22,19 +22,27 @@ import {
   ArrowLeft,
   ArrowUp,
   CalendarDays,
+  CircleHelp,
   ClipboardList,
+  Columns2,
   Copy,
   Eye,
   GripVertical,
   Image as ImageIcon,
+  Images,
+  LayoutGrid,
   LayoutTemplate,
+  MapPin,
   Megaphone,
   MoreHorizontal,
   Plus,
   Quote,
   Settings2,
+  Tag,
   Trash2,
+  TrendingUp,
   Type,
+  Users,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -42,6 +50,7 @@ import { useEffect, useId, useRef, useState, useTransition, type ReactNode } fro
 import { BlockSettings, type EditorCalendar, type EditorForm } from "@/components/funnels/editor/block-settings";
 import { PageSettings } from "@/components/funnels/editor/page-settings";
 import { BlockView, FunnelFrame, signupBlockId, type FunnelContext } from "@/components/funnels/funnel-view";
+import { SiteFooter, SiteHeader } from "@/components/funnels/site-chrome";
 import { Button, buttonClass, cx, Notice } from "@/components/ui";
 import { deleteFunnelAction, duplicateFunnelAction, publishFunnelAction, saveFunnelDraftAction, unpublishFunnelAction } from "@/lib/actions/funnels";
 import type { FormField } from "@/lib/forms/schema";
@@ -55,8 +64,20 @@ const BLOCK_ICONS: Record<BlockType, typeof Type> = {
   cta: Megaphone,
   testimonials: Quote,
   booking: CalendarDays,
+  features: LayoutGrid,
+  split: Columns2,
+  faq: CircleHelp,
+  pricing: Tag,
+  team: Users,
+  contact: MapPin,
+  gallery: Images,
+  stats: TrendingUp,
 };
-const BLOCK_ORDER: BlockType[] = ["hero", "text", "image", "form", "cta", "testimonials", "booking"];
+const BLOCK_GROUPS: { label: string; types: BlockType[] }[] = [
+  { label: "Basics", types: ["hero", "text", "split", "image", "cta"] },
+  { label: "Sell", types: ["features", "pricing", "testimonials", "stats", "faq"] },
+  { label: "Get in touch", types: ["form", "contact", "booking", "team", "gallery"] },
+];
 
 /** Deep equality that ignores the order of object keys (the database reorders them). */
 function same(a: unknown, b: unknown): boolean {
@@ -76,7 +97,8 @@ function cleanForSave(doc: FunnelDoc): FunnelDoc {
 type SaveState = { kind: "saved" | "saving" | "unsaved" } | { kind: "error"; message: string };
 
 export type EditorProps = {
-  funnel: { id: string; name: string; slug: string };
+  funnel: { id: string; name: string; slug: string; client_id: string | null };
+  clients: { id: string; name: string }[];
   initialDoc: FunnelDoc;
   publishedDoc: FunnelDoc | null;
   forms: (EditorForm & { fields: FormField[]; submit_label: string })[];
@@ -86,7 +108,7 @@ export type EditorProps = {
   settings: ReactNode;
 };
 
-export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendars, publicBase, settings }: EditorProps) {
+export function FunnelEditor({ funnel, clients, initialDoc, publishedDoc, forms, calendars, publicBase, settings }: EditorProps) {
   const dndId = useId();
   const [doc, setDoc] = useState(initialDoc);
   const [published, setPublished] = useState(publishedDoc);
@@ -195,7 +217,9 @@ export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendar
 
   function addBlock(type: BlockType, index?: number) {
     const block = newBlock(type, doc.language);
-    if (type === "form" && forms.length) (block as Extract<Block, { type: "form" }>).formId = forms.find((f) => f.is_active)?.id ?? null;
+    const ownForm = forms.find((f) => f.is_active && (f.client_id ?? null) === (funnel.client_id ?? null))?.id ?? null;
+    if (type === "form") (block as Extract<Block, { type: "form" }>).formId = ownForm;
+    if (type === "contact") (block as Extract<Block, { type: "contact" }>).formId = ownForm;
     if (type === "booking" && calendars.length) (block as Extract<Block, { type: "booking" }>).calendarId = calendars.find((c) => c.is_active)?.id ?? null;
     updateStep((s) => {
       const selectedIndex = s.blocks.findIndex((b) => b.id === selectedId);
@@ -482,9 +506,16 @@ export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendar
               <div className="sticky top-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                 <p className="mb-2 px-1 text-xs font-medium tracking-wide text-slate-500 uppercase">Add a block</p>
                 <p className="mb-3 px-1 text-xs text-slate-500">Drag onto the page, or click.</p>
-                <div className="space-y-1">
-                  {BLOCK_ORDER.map((type) => (
-                    <PaletteItem key={type} type={type} onAdd={() => addBlock(type)} />
+                <div className="space-y-3">
+                  {BLOCK_GROUPS.map((group) => (
+                    <div key={group.label}>
+                      <p className="mb-1 px-1 text-[11px] font-semibold tracking-wide text-slate-400 uppercase">{group.label}</p>
+                      <div className="space-y-0.5">
+                        {group.types.map((type) => (
+                          <PaletteItem key={type} type={type} onAdd={() => addBlock(type)} />
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -532,6 +563,11 @@ export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendar
 
               <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
                 <FunnelFrame doc={doc} className="min-h-[60vh]">
+                  {doc.site.header.enabled && (
+                    <ChromeArea label="Edit the menu" onSelect={() => select(null)}>
+                      <SiteHeader ctx={ctx} />
+                    </ChromeArea>
+                  )}
                   <SortableContext items={step.blocks.map((b) => b.id)} strategy={verticalListSortingStrategy}>
                     {step.blocks.map((block, i) => (
                       <SortableBlock
@@ -550,6 +586,9 @@ export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendar
                     ))}
                   </SortableContext>
                   <CanvasEnd empty={step.blocks.length === 0} highlight={overId === "canvas-end" && Boolean(dragging)} onAdd={() => setSheet("add")} />
+                  <ChromeArea label="Edit the footer" onSelect={() => select(null)}>
+                    <SiteFooter ctx={ctx} />
+                  </ChromeArea>
                 </FunnelFrame>
               </div>
             </div>
@@ -577,6 +616,10 @@ export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendar
                     stepIndex={stepIndex}
                     forms={forms}
                     calendars={calendars}
+                    owner={{ clientId: funnel.client_id, clients }}
+                    onCredit={(credit) =>
+                      update((d) => ({ ...d, photoCredits: [...d.photoCredits.filter((c) => c.url !== credit.url), credit].slice(-200) }))
+                    }
                   />
                 ) : (
                   <PageSettings
@@ -619,21 +662,28 @@ export function FunnelEditor({ funnel, initialDoc, publishedDoc, forms, calendar
                   <X className="size-5" />
                 </button>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                {BLOCK_ORDER.map((type) => {
-                  const Icon = BLOCK_ICONS[type];
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => addBlock(type)}
-                      className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-50"
-                    >
-                      <Icon className="size-4 shrink-0 text-brand-700" aria-hidden />
-                      {BLOCK_LABELS[type].label}
-                    </button>
-                  );
-                })}
+              <div className="max-h-[60dvh] space-y-3 overflow-y-auto">
+                {BLOCK_GROUPS.map((group) => (
+                  <div key={group.label}>
+                    <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-slate-400 uppercase">{group.label}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {group.types.map((type) => {
+                        const Icon = BLOCK_ICONS[type];
+                        return (
+                          <button
+                            key={type}
+                            type="button"
+                            onClick={() => addBlock(type)}
+                            className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-left text-sm font-medium text-slate-800 hover:bg-slate-50"
+                          >
+                            <Icon className="size-4 shrink-0 text-brand-700" aria-hidden />
+                            {BLOCK_LABELS[type].label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -712,6 +762,23 @@ function PaletteItem({ type, onAdd }: { type: BlockType; onAdd: () => void }) {
       </span>
       {BLOCK_LABELS[type].label}
     </button>
+  );
+}
+
+/** The menu or footer on the canvas: shown as on the page, and clicking opens the page settings. */
+function ChromeArea({ label, onSelect, children }: { label: string; onSelect: () => void; children: ReactNode }) {
+  return (
+    <div className="group relative">
+      <div className="pointer-events-none select-none" aria-hidden>
+        {children}
+      </div>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-label={label}
+        className="absolute inset-0 z-[1] w-full outline-none hover:ring-2 hover:ring-brand-200 hover:ring-inset focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-inset"
+      />
+    </div>
   );
 }
 

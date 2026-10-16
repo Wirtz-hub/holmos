@@ -16,19 +16,33 @@ import { ArrowLeft, ChevronDown, GripVertical, Plus, Trash2 } from "lucide-react
 import Link from "next/link";
 import { useEffect, useId, useState, useTransition, type CSSProperties, type ReactNode } from "react";
 import { FormPreview } from "@/components/funnels/funnel-view";
+import { OWNER_HINT, OwnerSelect, type ClientOption } from "@/components/owner-select";
 import { Button, Card, CardHeader, cx, Field, inputClass, Notice } from "@/components/ui";
 import { deleteFormAction, saveFormAction, type FormInput } from "@/lib/actions/forms";
 import { FIELD_TYPES, MAPS_TO, newField, type FieldType, type FormField } from "@/lib/forms/schema";
 import { STAGES } from "@/lib/pipeline";
 
-type FormRow = Omit<FormInput, "fields" | "redirect_url" | "notify_email"> & {
+type FormRow = Omit<FormInput, "fields" | "redirect_url" | "notify_email" | "client_id"> & {
+  client_id: string;
   id: string;
   fields: FormField[];
   redirect_url: string;
   notify_email: string;
 };
 
-export function FormBuilder({ initial, answerCount, share, answers }: { initial: FormRow; answerCount: number; share: ReactNode; answers: ReactNode }) {
+export function FormBuilder({
+  initial,
+  clients,
+  answerCount,
+  share,
+  answers,
+}: {
+  initial: FormRow;
+  clients: ClientOption[];
+  answerCount: number;
+  share: ReactNode;
+  answers: ReactNode;
+}) {
   const dndId = useId();
   const [form, setForm] = useState(initial);
   const [saved, setSaved] = useState(initial);
@@ -173,6 +187,9 @@ export function FormBuilder({ initial, answerCount, share, answers }: { initial:
             <Field label="Name" htmlFor="name" error={errors.name} hint="Only you see this.">
               <input id="name" value={form.name} onChange={(e) => set({ name: e.target.value })} maxLength={120} className={inputClass} />
             </Field>
+            <Field label="Belongs to" htmlFor="client_id" hint={OWNER_HINT}>
+              <OwnerSelect clients={clients} value={form.client_id} onChange={(client_id) => set({ client_id })} />
+            </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Button text" htmlFor="submit_label" error={errors.submit_label}>
                 <input id="submit_label" value={form.submit_label} onChange={(e) => set({ submit_label: e.target.value })} maxLength={60} className={inputClass} />
@@ -196,15 +213,22 @@ export function FormBuilder({ initial, answerCount, share, answers }: { initial:
               <input id="redirect_url" value={form.redirect_url} onChange={(e) => set({ redirect_url: e.target.value.trim() })} placeholder="https://" className={inputClass} />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="New leads go to" htmlFor="lead_stage" hint="Pipeline stage for people who aren't clients yet. Existing clients stay where they are.">
-                <select id="lead_stage" value={form.lead_stage} onChange={(e) => set({ lead_stage: e.target.value as FormRow["lead_stage"] })} className={inputClass}>
-                  {STAGES.map((stage) => (
-                    <option key={stage.id} value={stage.id}>
-                      {stage.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+              {form.client_id ? (
+                <p className="self-center rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                  People who answer are added to the contact list of{" "}
+                  <strong>{clients.find((c) => c.id === form.client_id)?.name ?? "this client"}</strong>.
+                </p>
+              ) : (
+                <Field label="New leads go to" htmlFor="lead_stage" hint="Pipeline stage for people who aren't clients yet. Existing clients stay where they are.">
+                  <select id="lead_stage" value={form.lead_stage} onChange={(e) => set({ lead_stage: e.target.value as FormRow["lead_stage"] })} className={inputClass}>
+                    {STAGES.map((stage) => (
+                      <option key={stage.id} value={stage.id}>
+                        {stage.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label="Email me each answer at" htmlFor="notify_email" error={errors.notify_email} hint="Leave empty for no emails. Needs email set up (see the setup guide).">
                 <input id="notify_email" type="email" value={form.notify_email} onChange={(e) => set({ notify_email: e.target.value })} className={inputClass} />
               </Field>

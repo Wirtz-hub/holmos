@@ -1,9 +1,10 @@
 "use client";
 
-import { ImageUp, LoaderCircle, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ImageUp, LoaderCircle, Plus, Search, Trash2, X } from "lucide-react";
 import { useId, useRef, useState, type ReactNode } from "react";
+import { StockPhotoPicker } from "@/components/funnels/editor/stock-photo-picker";
 import { cx, inputClass } from "@/components/ui";
-import { ACCENTS, type ButtonTarget, type Step } from "@/lib/funnels/schema";
+import { ACCENTS, type ButtonTarget, type PhotoCredit, type Step } from "@/lib/funnels/schema";
 
 // Small inputs used by the page editor's settings panels.
 
@@ -138,10 +139,24 @@ export function ButtonTargetInput({ value, onChange, steps, stepIndex }: { value
   );
 }
 
-export function ImageInput({ label, value, onChange, hint }: { label: string; value: string; onChange: (value: string) => void; hint?: ReactNode }) {
+export function ImageInput({
+  label,
+  value,
+  onChange,
+  hint,
+  onCredit,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  hint?: ReactNode;
+  /** Called when a stock photo is picked, so its photographer can be credited. Also turns on photo search. */
+  onCredit?: (credit: PhotoCredit) => void;
+}) {
   const id = useId();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function upload(file: File) {
@@ -191,6 +206,16 @@ export function ImageInput({ label, value, onChange, hint }: { label: string; va
           {uploading ? <LoaderCircle className="size-4 animate-spin" aria-hidden /> : <ImageUp className="size-4" aria-hidden />}
           {uploading ? "Uploading…" : "Upload"}
         </button>
+        {onCredit && (
+          <button
+            type="button"
+            onClick={() => setSearching((open) => !open)}
+            aria-expanded={searching}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm ring-1 ring-slate-300 ring-inset hover:bg-slate-50"
+          >
+            <Search className="size-4" aria-hidden /> Find
+          </button>
+        )}
         <input
           id={id}
           value={value}
@@ -210,6 +235,70 @@ export function ImageInput({ label, value, onChange, hint }: { label: string; va
         }}
       />
       {error && <p className="mt-1 text-sm text-rose-600">{error}</p>}
+      {searching && onCredit && (
+        <StockPhotoPicker
+          onPick={(url, credit) => {
+            onChange(url);
+            onCredit(credit);
+          }}
+          onClose={() => setSearching(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A list of similar items (services, questions, prices…): edit, reorder, add and remove. */
+export function ListEditor<T>({
+  items,
+  onChange,
+  itemLabel,
+  newItem,
+  max,
+  addLabel,
+  children,
+}: {
+  items: T[];
+  onChange: (items: T[]) => void;
+  itemLabel: (index: number) => string;
+  newItem: () => T;
+  max: number;
+  addLabel: string;
+  children: (item: T, update: (patch: Partial<T>) => void) => ReactNode;
+}) {
+  const move = (from: number, to: number) => {
+    const next = [...items];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    onChange(next);
+  };
+  const tool = "rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-30";
+  return (
+    <div className="space-y-3">
+      {items.map((item, i) => (
+        <div key={i} className="space-y-2 rounded-lg border border-slate-200 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-500">{itemLabel(i)}</span>
+            <div className="flex">
+              <button type="button" disabled={i === 0} onClick={() => move(i, i - 1)} className={tool} aria-label="Move up">
+                <ArrowUp className="size-4" />
+              </button>
+              <button type="button" disabled={i === items.length - 1} onClick={() => move(i, i + 1)} className={tool} aria-label="Move down">
+                <ArrowDown className="size-4" />
+              </button>
+              <button type="button" onClick={() => onChange(items.filter((_, j) => j !== i))} className={cx(tool, "hover:bg-rose-50 hover:text-rose-700")} aria-label="Remove">
+                <Trash2 className="size-4" />
+              </button>
+            </div>
+          </div>
+          {children(item, (patch) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it))))}
+        </div>
+      ))}
+      {items.length < max && (
+        <button type="button" onClick={() => onChange([...items, newItem()])} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-600">
+          <Plus className="size-4" aria-hidden /> {addLabel}
+        </button>
+      )}
     </div>
   );
 }

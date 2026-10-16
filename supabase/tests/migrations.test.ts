@@ -387,3 +387,90 @@ describe("bookings", () => {
     expect(await as(OTHER, "select email from public.calendar_connections")).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pages and forms for clients, with a contact list per client
+// ---------------------------------------------------------------------------
+
+describe("client contact lists", () => {
+  async function clientWithForm(name: string) {
+    const [client] = await as<{ id: string }>(ADMIN, "insert into public.clients (name) values ($1) returning id", [name]);
+    const [form] = await as<{ id: string }>(
+      ADMIN,
+      "insert into public.forms (name, client_id) values ($1, $2) returning id",
+      [`${name} contact form`, client.id],
+    );
+    return { clientId: client.id, formId: form.id };
+  }
+
+  const countClients = async () => (await as<{ n: number }>(ADMIN, "select count(*)::int as n from public.clients"))[0].n;
+
+  it("puts answers to a client's form on that client's list, not in your pipeline", async () => {
+    const { clientId, formId } = await clientWithForm("Tandlæge Holm");
+    const before = await countClients();
+
+    const result = (await submit(formId, { name: "Patient Pia", email: "Pia@Example.com" })) as unknown as {
+      client_id: string | null;
+      contact_id: string;
+      owner_client_id: string;
+    };
+    expect(result.client_id).toBeNull();
+    expect(result.owner_client_id).toBe(clientId);
+    expect(await countClients()).toBe(before);
+
+    const [contact] = await as<Record<string, unknown>>(ADMIN, "select client_id, name, email from public.contacts where id = $1", [
+      result.contact_id,
+    ]);
+    expect(contact).toEqual({ client_id: clientId, name: "Patient Pia", email: "pia@example.com" });
+    const events = await as<{ kind: string; body: string | null }>(
+      ADMIN,
+      "select kind, body from public.contact_events where contact_id = $1 order by kind",
+      [result.contact_id],
+    );
+    expect(events.map((e) => e.kind)).toEqual(["created", "form_submitted"]);
+    expect(events[1].body).toContain("Message: Hello");
+  });
+
+  it("recognises returning people per client, but keeps each client's list separate", async () => {
+    const a = await clientWithForm("Frisør A");
+    const b = await clientWithForm("Frisør B");
+    const first = (await submit(a.formId, { email: "kunde@example.com" })) as unknown as { contact_id: string };
+    const again = (await submit(a.formId, { email: "KUNDE@example.com", phone: "11 22 33 44", name: "Kim" })) as unknown as {
+      contact_id: string;
+    };
+    const other = (await submit(b.formId, { email: "kunde@example.com" })) as unknown as { contact_id: string };
+
+    expect(again.contact_id).toBe(first.contact_id);
+    expect(other.contact_id).not.toBe(first.contact_id);
+    const [filled] = await as<Record<string, string>>(ADMIN, "select name, phone from public.contacts where id = $1", [first.contact_id]);
+    expect(filled).toEqual({ name: "Kim", phone: "11 22 33 44" });
+  });
+
+  it("keeps contact lists private, and lets a future client login read only its own", async () => {
+    const { clientId, formId } = await clientWithForm("Privat Klinik");
+    await submit(formId, { email: "hemmelig@example.com" });
+    await expect(asVisitor("select * from public.contacts")).rejects.toThrow(/permission denied/);
+    expect(await as(OTHER, "select email from public.contacts")).toEqual([]);
+    await expect(as(ADMIN, "select public.upsert_contact($1, '{\"email\": \"x@example.com\"}')", [clientId])).rejects.toThrow(
+      /permission denied/,
+    );
+
+    await as(ADMIN, "insert into public.client_access (user_id, client_id) values ($1, $2)", [OTHER, clientId]);
+    await as(ADMIN, "update public.clients set portal_enabled = true where id = $1", [clientId]);
+    expect(await as(OTHER, "select email from public.contacts")).toEqual([{ email: "hemmelig@example.com" }]);
+    expect(await as(OTHER, "select kind from public.contact_events order by kind")).toEqual([{ kind: "created" }, { kind: "form_submitted" }]);
+    expect(await as(OTHER, "update public.contacts set notes = 'x' returning id")).toEqual([]);
+  });
+
+  it("removes a client's contacts with the client, and its forms fall back to your pipeline", async () => {
+    const { clientId, formId } = await clientWithForm("Lukket Firma");
+    await submit(formId, { email: "gammel@example.com" });
+    await as(ADMIN, "delete from public.clients where id = $1", [clientId]);
+
+    expect(await as(ADMIN, "select id from public.contacts where client_id = $1", [clientId])).toEqual([]);
+    const [form] = await as<{ client_id: string | null }>(ADMIN, "select client_id from public.forms where id = $1", [formId]);
+    expect(form.client_id).toBeNull();
+    const after = (await submit(formId, { email: "ny@example.com" })) as unknown as { client_id: string | null };
+    expect(after.client_id).not.toBeNull();
+  });
+});

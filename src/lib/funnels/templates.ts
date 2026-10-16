@@ -1,4 +1,4 @@
-import { newBlock, newStep, type Block, type FunnelDoc, type Language } from "@/lib/funnels/schema";
+import { newBlock, newStep, siteSchema, type Block, type FunnelDoc, type Language } from "@/lib/funnels/schema";
 
 // Starter templates. Their text is placeholder copy, meant to be replaced.
 
@@ -24,6 +24,8 @@ export function buildTemplate(template: TemplateId, language: Language): FunnelD
     language,
     indexable: true,
     theme: { accent: "#1d4669", background: "white", font: "sans" },
+    site: siteSchema.parse({}),
+    photoCredits: [],
     steps,
   });
 
@@ -147,14 +149,14 @@ export function buildTemplate(template: TemplateId, language: Language): FunnelD
   }
 }
 
-/** Fills empty form and booking blocks with the given ids. */
+/** Fills empty form, contact and booking blocks with the given ids. */
 export function fillTemplateIds(doc: FunnelDoc, ids: { formId?: string | null; calendarId?: string | null }): FunnelDoc {
   return {
     ...doc,
     steps: doc.steps.map((step) => ({
       ...step,
       blocks: step.blocks.map((block) => {
-        if (block.type === "form" && !block.formId && ids.formId) return { ...block, formId: ids.formId };
+        if ((block.type === "form" || block.type === "contact") && !block.formId && ids.formId) return { ...block, formId: ids.formId };
         if (block.type === "booking" && !block.calendarId && ids.calendarId) return { ...block, calendarId: ids.calendarId };
         return block;
       }),
@@ -162,4 +164,4 @@ export function fillTemplateIds(doc: FunnelDoc, ids: { formId?: string | null; c
   };
 }
 
-export const templateUsesForm = (doc: FunnelDoc) => doc.steps.some((s) => s.blocks.some((b) => b.type === "form"));
+export const templateUsesForm = (doc: FunnelDoc) => doc.steps.some((s) => s.blocks.some((b) => b.type === "form" || b.type === "contact"));

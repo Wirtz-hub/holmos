@@ -25,6 +25,7 @@ type Row = {
   updated_at: string;
   published_at: string | null;
   draft: { steps?: unknown[] };
+  owner: string | null;
   live: boolean;
   changed: boolean;
 };
@@ -32,12 +33,13 @@ type Row = {
 async function Funnels() {
   const { supabase } = await requireAdmin();
   // The database stores both versions with keys in the same order, so comparing them as text works.
-  const { data, error } = await supabase.from("funnels").select("id, name, slug, custom_domain, updated_at, published_at, draft, published").order("updated_at", {
+  const { data, error } = await supabase.from("funnels").select("id, name, slug, custom_domain, updated_at, published_at, draft, published, clients(name)").order("updated_at", {
     ascending: false,
   });
   if (error) throw new Error(error.message);
-  const rows: Row[] = (data ?? []).map(({ published, ...row }) => ({
+  const rows: Row[] = (data ?? []).map(({ published, clients, ...row }) => ({
     ...row,
+    owner: (clients as unknown as { name: string } | null)?.name ?? null,
     live: published !== null,
     changed: published !== null && JSON.stringify(published) !== JSON.stringify(row.draft),
   }));
@@ -73,6 +75,7 @@ async function Funnels() {
                   {row.name}
                 </Link>
                 <p className="mt-0.5 text-xs text-slate-500">
+                  {row.owner ? `For ${row.owner} · ` : ""}
                   {(row.draft.steps?.length ?? 1) === 1 ? "1 step" : `${row.draft.steps?.length} steps`} · edited {formatDateTime(row.updated_at)}
                 </p>
               </div>

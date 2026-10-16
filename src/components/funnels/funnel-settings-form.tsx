@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useActionState, useState, useTransition } from "react";
+import { OWNER_HINT, OwnerSelect, type ClientOption } from "@/components/owner-select";
 import { Button, Card, CardHeader, Field, inputClass, Notice } from "@/components/ui";
 import { checkDomainAction, saveFunnelSettingsAction } from "@/lib/actions/funnels";
 import { normaliseDomain } from "@/lib/hosts";
@@ -9,9 +10,11 @@ import { normaliseDomain } from "@/lib/hosts";
 
 export function FunnelSettingsForm({
   funnel,
+  clients,
   appAddress,
 }: {
-  funnel: { id: string; name: string; slug: string; custom_domain: string | null };
+  funnel: { id: string; name: string; slug: string; custom_domain: string | null; client_id: string | null };
+  clients: ClientOption[];
   /** e.g. "https://holmos.vercel.app" */
   appAddress: string;
 }) {
@@ -38,6 +41,9 @@ export function FunnelSettingsForm({
         <div className="space-y-4 p-5">
           <Field label="Name" htmlFor="name" error={errors.name} hint="Only you see this.">
             <input id="name" name="name" required maxLength={120} defaultValue={funnel.name} className={inputClass} />
+          </Field>
+          <Field label="Belongs to" htmlFor="client_id" hint={OWNER_HINT}>
+            <OwnerSelect clients={clients} defaultValue={funnel.client_id ?? ""} />
           </Field>
           <Field label="Address on HolmOS" htmlFor="slug" error={errors.slug} hint="Changing it breaks links you've already shared or used in ads.">
             <div className="flex items-stretch overflow-hidden rounded-lg shadow-sm ring-1 ring-slate-300 ring-inset focus-within:ring-2 focus-within:ring-brand-500">

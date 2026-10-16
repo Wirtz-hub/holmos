@@ -26,24 +26,27 @@ export default function FormPage({ params }: PageProps<"/forms/[id]">) {
 type Submission = {
   id: string;
   client_id: string | null;
+  contact_id: string | null;
   answers: { label: string; value: string }[];
   source_url: string | null;
   created_at: string;
   clients: { name: string } | null;
+  contacts: { name: string | null; email: string | null; client_id: string } | null;
 };
 
 async function Content({ params }: { params: PageProps<"/forms/[id]">["params"] }) {
   const { id } = await params;
   if (!UUID.test(id)) notFound();
   const { supabase } = await requireAdmin();
-  const [formResult, submissionsResult] = await Promise.all([
+  const [formResult, submissionsResult, clientsResult] = await Promise.all([
     supabase.from("forms").select("*").eq("id", id).maybeSingle(),
     supabase
       .from("form_submissions")
-      .select("id, client_id, answers, source_url, created_at, clients(name)", { count: "exact" })
+      .select("id, client_id, contact_id, answers, source_url, created_at, clients(name), contacts(name, email, client_id)", { count: "exact" })
       .eq("form_id", id)
       .order("created_at", { ascending: false })
       .limit(50),
+    supabase.from("clients").select("id, name").order("name"),
   ]);
   if (formResult.error) throw new Error(formResult.error.message);
   const form = formResult.data;
@@ -83,12 +86,19 @@ async function Content({ params }: { params: PageProps<"/forms/[id]">["params"] 
           {submissions.map((submission) => (
             <li key={submission.id} className="px-5 py-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                {submission.client_id ? (
+                {submission.contacts ? (
+                  <Link
+                    href={`/clients/${submission.contacts.client_id}/contacts#contact-${submission.contact_id}`}
+                    className="text-sm font-semibold text-slate-900 hover:text-brand-700"
+                  >
+                    {submission.contacts.name ?? submission.contacts.email ?? "Contact"}
+                  </Link>
+                ) : submission.client_id ? (
                   <Link href={`/clients/${submission.client_id}`} className="text-sm font-semibold text-slate-900 hover:text-brand-700">
                     {submission.clients?.name ?? "Client"}
                   </Link>
                 ) : (
-                  <span className="text-sm font-semibold text-slate-500">Deleted client</span>
+                  <span className="text-sm font-semibold text-slate-500">Deleted</span>
                 )}
                 <time dateTime={submission.created_at} className="text-xs text-slate-400 tabular">
                   {formatDateTime(submission.created_at)}
@@ -123,7 +133,9 @@ async function Content({ params }: { params: PageProps<"/forms/[id]">["params"] 
         lead_stage: form.lead_stage as Stage,
         notify_email: form.notify_email ?? "",
         is_active: form.is_active,
+        client_id: form.client_id ?? "",
       }}
+      clients={(clientsResult.data ?? []) as { id: string; name: string }[]}
       answerCount={submissionsResult.count ?? submissions.length}
       share={share}
       answers={answers}

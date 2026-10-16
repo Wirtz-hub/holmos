@@ -5,15 +5,23 @@ import { refresh, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { FormState } from "@/lib/actions/clients";
+import { readWebsite, WebsiteReadError, type WebsiteText } from "@/lib/ai/read-website";
+import { TONES, type Tone } from "@/lib/ai/site-answer";
+import { SiteWriterError, writeSite } from "@/lib/ai/site-writer";
 import { requireAdmin } from "@/lib/auth";
 import { defaultFields } from "@/lib/forms/schema";
 import { funnelDocSchema, STEP_SLUG, type FunnelDoc } from "@/lib/funnels/schema";
 import { buildTemplate, fillTemplateIds, TEMPLATES, templateUsesForm, type TemplateId } from "@/lib/funnels/templates";
+import { buildSite, buildWebsite, isWebsiteTemplate, type SiteContent, type WebsiteTemplateId } from "@/lib/funnels/website-templates";
 import { DOMAIN_PATTERN, normaliseDomain } from "@/lib/hosts";
 import { PUBLIC_TAGS } from "@/lib/public-data";
 import { freeSlug } from "@/lib/slugs";
+import { fillStockPhotos } from "@/lib/unsplash";
 
 const idSchema = z.uuid();
+
+/** "" (your own) or a client's id. */
+const ownerSchema = z.union([z.uuid(), z.literal("")]).transform((value) => value || null);
 
 function firstIssue(error: z.ZodError) {
   const issue = error.issues[0];
@@ -21,24 +29,35 @@ function firstIssue(error: z.ZodError) {
 }
 
 const createSchema = z.object({
-  name: z.string().trim().min(1, "Give the page a name").max(120),
-  template: z.enum(TEMPLATES.map((t) => t.id) as [TemplateId, ...TemplateId[]]),
+  name: z.string().trim().max(120, "Keep the name under 120 characters"),
+  template: z
+    .string()
+    .refine((id) => TEMPLATES.some((t) => t.id === id) || isWebsiteTemplate(id), "Pick a starting point"),
   language: z.enum(["da", "en"]),
+  client_id: ownerSchema,
+  business_name: z.string().trim().max(120, "Keep the business name under 120 characters"),
 });
 
-export async function createFunnelAction(_prev: FormState, formData: FormData): Promise<FormState> {
-  const { supabase, email } = await requireAdmin();
-  const parsed = createSchema.safeParse({
-    name: formData.get("name"),
-    template: formData.get("template"),
-    language: formData.get("language"),
-  });
-  if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) };
-  const { name, template, language } = parsed.data;
+type Supabase = Awaited<ReturnType<typeof requireAdmin>>["supabase"];
 
-  let doc = buildTemplate(template, language);
+async function clientName(supabase: Supabase, clientId: string | null) {
+  if (!clientId) return "";
+  const { data } = await supabase.from("clients").select("name").eq("id", clientId).maybeSingle();
+  return (data?.name as string | undefined) ?? "";
+}
+
+/**
+ * Saves a new page: gives it its own form if it has form or contact blocks,
+ * points booking blocks at a booking page, and swaps placeholder pictures for
+ * stock photos.
+ */
+async function saveNewPage(
+  supabase: Supabase,
+  { name, doc: start, clientId, notifyEmail }: { name: string; doc: FunnelDoc; clientId: string | null; notifyEmail: string },
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  const language = start.language;
   let formId: string | null = null;
-  if (templateUsesForm(doc)) {
+  if (templateUsesForm(start)) {
     const { data: form, error } = await supabase
       .from("forms")
       .insert({
@@ -46,7 +65,8 @@ export async function createFunnelAction(_prev: FormState, formData: FormData): 
         fields: defaultFields(language),
         language,
         success_message: language === "da" ? "Tak! Vi vender tilbage hurtigst muligt." : "Thank you! We'll be in touch soon.",
-        notify_email: email || null,
+        notify_email: notifyEmail || null,
+        client_id: clientId,
       })
       .select("id")
       .single();
@@ -55,15 +75,117 @@ export async function createFunnelAction(_prev: FormState, formData: FormData): 
     updateTag(PUBLIC_TAGS.forms);
   }
   const { data: calendar } = await supabase.from("booking_calendars").select("id").eq("is_active", true).order("created_at").limit(1).maybeSingle();
-  doc = fillTemplateIds(doc, { formId, calendarId: calendar?.id ?? null });
+  const { doc } = await fillStockPhotos(fillTemplateIds(start, { formId, calendarId: calendar?.id ?? null }));
 
   const { data, error } = await supabase
     .from("funnels")
-    .insert({ name, slug: await freeSlug(supabase, "funnels", name), draft: doc })
+    .insert({ name, slug: await freeSlug(supabase, "funnels", name), draft: doc, client_id: clientId })
     .select("id")
     .single();
   if (error || !data) return { ok: false, message: `Couldn't create the page: ${error?.message ?? "unknown error"}` };
-  redirect(`/funnels/${data.id}`);
+  return { ok: true, id: data.id };
+}
+
+export async function createFunnelAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { supabase, email } = await requireAdmin();
+  const parsed = createSchema.safeParse({
+    name: formData.get("name") ?? "",
+    template: formData.get("template") ?? "",
+    language: formData.get("language") ?? "da",
+    client_id: String(formData.get("client_id") ?? ""),
+    business_name: formData.get("business_name") ?? "",
+  });
+  if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) };
+  const { template, language, client_id } = parsed.data;
+
+  let doc: FunnelDoc;
+  let name = parsed.data.name;
+  if (isWebsiteTemplate(template)) {
+    const businessName = parsed.data.business_name || (await clientName(supabase, client_id)) || name;
+    if (!businessName) return { ok: false, message: "Write the business's name." };
+    doc = buildWebsite(template.slice("site-".length) as WebsiteTemplateId, businessName);
+    name ||= businessName;
+  } else {
+    if (!name) return { ok: false, message: "Give the page a name" };
+    doc = buildTemplate(template as TemplateId, language);
+  }
+
+  const saved = await saveNewPage(supabase, { name, doc, clientId: client_id, notifyEmail: email });
+  if (!saved.ok) return saved;
+  redirect(`/funnels/${saved.id}`);
+}
+
+const aiSchema = z
+  .object({
+    name: z.string().trim().max(120, "Keep the name under 120 characters"),
+    client_id: ownerSchema,
+    language: z.enum(["da", "en"]),
+    provider: z.enum(["claude", "gemini"], "Choose which AI should write it"),
+    business_name: z.string().trim().max(120, "Keep the business name under 120 characters"),
+    about: z.string().trim().max(1000, "Keep “What they do” under 1,000 characters"),
+    city: z.string().trim().max(120),
+    services: z.string().trim().max(3000, "Keep the services under 3,000 characters"),
+    audience: z.string().trim().max(500),
+    extra: z.string().trim().max(1000),
+    tone: z.enum(Object.keys(TONES) as [Tone, ...Tone[]]),
+    website: z.string().trim().max(500),
+  })
+  .refine((v) => v.business_name || v.website, "Write the business's name, or its current website so the AI can find it there.")
+  .refine((v) => v.about || v.website, "Describe what the business does, or give its current website.");
+
+/** Lets Claude or Gemini write a whole website from a short brief and, if there is one, the client's current website. */
+export async function generateWebsiteAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const { supabase, email } = await requireAdmin();
+  const field = (key: string) => String(formData.get(key) ?? "");
+  const parsed = aiSchema.safeParse({
+    name: field("name"),
+    client_id: field("client_id"),
+    language: field("language") || "da",
+    provider: field("provider"),
+    business_name: field("business_name"),
+    about: field("about"),
+    city: field("city"),
+    services: field("services"),
+    audience: field("audience"),
+    extra: field("extra"),
+    tone: field("tone") || "friendly",
+    website: field("website"),
+  });
+  if (!parsed.success) return { ok: false, message: firstIssue(parsed.error) };
+  const input = parsed.data;
+
+  let website: WebsiteText | null = null;
+  if (input.website) {
+    try {
+      website = await readWebsite(input.website);
+    } catch (error) {
+      if (error instanceof WebsiteReadError) return { ok: false, message: `Couldn't read the current website: ${error.message}` };
+      throw error;
+    }
+  }
+
+  let content: SiteContent;
+  try {
+    content = await writeSite(input.provider, {
+      businessName: input.business_name || (await clientName(supabase, input.client_id)),
+      about: input.about,
+      city: input.city,
+      services: input.services,
+      audience: input.audience,
+      extra: input.extra,
+      tone: input.tone,
+      language: input.language,
+      website,
+    });
+  } catch (error) {
+    if (error instanceof SiteWriterError) return { ok: false, message: error.message };
+    throw error;
+  }
+
+  const name = input.name || content.businessName || "Website";
+  const saved = await saveNewPage(supabase, { name, doc: buildSite(content, input.language), clientId: input.client_id, notifyEmail: email });
+  if (!saved.ok) return saved;
+  redirect(`/funnels/${saved.id}`);
 }
 
 export type SaveResult = { ok: true; savedAt: string } | { ok: false; message: string };
@@ -138,6 +260,7 @@ const settingsSchema = z.object({
     .transform(normaliseDomain)
     .refine((value) => value === "" || DOMAIN_PATTERN.test(value), "That doesn't look like a domain. Use something like tilbud.example.dk")
     .transform((value) => value || null),
+  client_id: ownerSchema,
 });
 
 export async function saveFunnelSettingsAction(funnelId: string, _prev: FormState, formData: FormData): Promise<FormState> {
@@ -147,6 +270,7 @@ export async function saveFunnelSettingsAction(funnelId: string, _prev: FormStat
     name: formData.get("name") ?? "",
     slug: formData.get("slug") ?? "",
     custom_domain: formData.get("custom_domain") ?? "",
+    client_id: String(formData.get("client_id") ?? ""),
   });
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -173,11 +297,16 @@ export async function saveFunnelSettingsAction(funnelId: string, _prev: FormStat
 export async function duplicateFunnelAction(funnelId: string) {
   const { supabase } = await requireAdmin();
   if (!idSchema.safeParse(funnelId).success) return;
-  const { data: funnel } = await supabase.from("funnels").select("name, slug, draft").eq("id", funnelId).maybeSingle();
+  const { data: funnel } = await supabase.from("funnels").select("name, slug, draft, client_id").eq("id", funnelId).maybeSingle();
   if (!funnel) return;
   const { data } = await supabase
     .from("funnels")
-    .insert({ name: `${funnel.name} (copy)`, slug: await freeSlug(supabase, "funnels", `${funnel.slug}-copy`), draft: funnel.draft })
+    .insert({
+      name: `${funnel.name} (copy)`,
+      slug: await freeSlug(supabase, "funnels", `${funnel.slug}-copy`),
+      draft: funnel.draft,
+      client_id: funnel.client_id,
+    })
     .select("id")
     .single();
   if (data) redirect(`/funnels/${data.id}`);
