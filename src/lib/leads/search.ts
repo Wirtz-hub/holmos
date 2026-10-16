@@ -1,6 +1,6 @@
 import "server-only";
 import { serverEnv } from "@/lib/env";
-import { osmFilters, overpassQuery } from "@/lib/leads/osm-trades";
+import { englishTrade, osmFilters, overpassQuery } from "@/lib/leads/osm-trades";
 import type { Lead } from "@/lib/leads/types";
 
 // Finds businesses by trade and place, anywhere in the world. With
@@ -93,50 +93,92 @@ async function searchGoogle(query: string, limit: number): Promise<Lead[]> {
 
 // OpenStreetMap's rules ask every app to say who it is.
 const OSM_HEADERS = { "User-Agent": "HolmOS lead finder (holmnordic.com)", "Accept-Language": "en" };
-const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+// The free Overpass servers are often busy or down, so all are asked at once and the first answer wins.
+const OVERPASS = ["https://overpass.private.coffee/api/interpreter", "https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+const BUSY = "The free map search is busy right now. Try again in a minute — or add a Google Maps key for fast, reliable results (SETUP.md 8).";
 
-/** The box around a town or region: south, west, north, east. */
-async function areaBox(area: string): Promise<[number, number, number, number]> {
+/** The box around a town or region. */
+async function findArea(area: string): Promise<[number, number, number, number]> {
   const url = new URL("https://nominatim.openstreetmap.org/search");
   url.search = new URLSearchParams({ q: area, format: "jsonv2", limit: "1" }).toString();
   const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000), headers: OSM_HEADERS }).catch(() => {
     throw new LeadSearchError("Couldn't reach OpenStreetMap. Try again in a moment.");
   });
   if (!res.ok) throw new LeadSearchError(`OpenStreetMap had a problem finding “${area}” (${res.status}).`);
-  const [place] = (await res.json().catch(() => [])) as { boundingbox?: string[]; lat?: string; lon?: string }[];
+  const [place] = (await res.json().catch(() => [])) as { boundingbox?: string[] }[];
   if (!place?.boundingbox) throw new LeadSearchError(`Couldn't find “${area}” on the map. Try a town name.`);
   const [south, north, west, east] = place.boundingbox.map(Number);
-  // Whole countries are too big for the free map search; look around the middle instead.
-  if (north - south > 1 || east - west > 1.6) {
-    const lat = Number(place.lat);
-    const lon = Number(place.lon);
-    return [lat - 0.25, lon - 0.4, lat + 0.25, lon + 0.4];
+  // Whole countries and big regions time out on the free servers, so say so at once instead of after a minute.
+  if (north - south > 1.2 || east - west > 2) {
+    throw new LeadSearchError(`“${area}” is too big for the free map search. Search one town at a time (e.g. Aarhus, then Odense) — or add a Google Maps key (SETUP.md 8).`);
   }
   return [south, west, north, east];
 }
 
 type OsmElement = { type: string; id: number; tags?: Record<string, string> };
 
-async function searchOsm(trade: string, area: string, limit: number): Promise<Lead[]> {
-  const query = overpassQuery(osmFilters(trade), await areaBox(area), limit * 2);
-  let elements: OsmElement[] | null = null;
-  for (const server of OVERPASS) {
-    try {
-      const res = await fetch(server, {
-        method: "POST",
-        cache: "no-store",
-        signal: AbortSignal.timeout(60_000),
-        headers: { ...OSM_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ data: query }).toString(),
-      });
-      if (!res.ok) continue;
-      elements = ((await res.json()) as { elements?: OsmElement[] }).elements ?? [];
-      break;
-    } catch {
-      // Try the next server.
-    }
+async function askOverpass(query: string): Promise<OsmElement[] | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 85_000);
+  try {
+    return await Promise.any(
+      OVERPASS.map(async (server) => {
+        const res = await fetch(server, {
+          method: "POST",
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { ...OSM_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ data: query }).toString(),
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const body = (await res.json()) as { elements?: OsmElement[]; remark?: string };
+        // Busy servers sometimes answer at once with nothing (or a time-out remark); let a server with results win.
+        if (!body.elements?.length) throw new Error(body.remark ?? "empty");
+        return body.elements;
+      }),
+    );
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
   }
-  if (!elements) throw new LeadSearchError("The free map search is busy right now. Try again in a minute — or add a Google Maps key for fast, reliable results (SETUP.md 8).");
+}
+
+/** Last resort: OpenStreetMap's own place search, which is steadier but finds fewer. */
+async function askNominatim(trade: string, area: string, limit: number): Promise<OsmElement[] | null> {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.search = new URLSearchParams({ q: `${englishTrade(trade)} in ${area}`, format: "jsonv2", extratags: "1", addressdetails: "1", limit: String(Math.min(limit, 40)) }).toString();
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(15_000), headers: OSM_HEADERS });
+    if (!res.ok) return null;
+    const places = (await res.json()) as { osm_type: string; osm_id: number; name?: string; type?: string; extratags?: Record<string, string> | null; address?: Record<string, string> }[];
+    return places
+      .filter((p) => p.name)
+      .map((p) => {
+        const a = p.address ?? {};
+        return {
+          type: p.osm_type,
+          id: p.osm_id,
+          tags: {
+            ...(p.extratags ?? {}),
+            name: p.name!,
+            ...(p.type ? { amenity: p.type } : {}),
+            ...(a.road ? { "addr:street": a.road } : {}),
+            ...(a.house_number ? { "addr:housenumber": a.house_number } : {}),
+            ...(a.postcode ? { "addr:postcode": a.postcode } : {}),
+            ...((a.city ?? a.town ?? a.village) ? { "addr:city": (a.city ?? a.town ?? a.village)! } : {}),
+          },
+        };
+      });
+  } catch {
+    return null;
+  }
+}
+
+async function searchOsm(trade: string, area: string, limit: number): Promise<Lead[]> {
+  const elements = (await askOverpass(overpassQuery(osmFilters(trade), await findArea(area), limit * 2))) ?? (await askNominatim(trade, area, limit));
+  if (!elements) throw new LeadSearchError(BUSY);
 
   const seen = new Set<string>();
   const leads: Lead[] = [];

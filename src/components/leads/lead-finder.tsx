@@ -200,7 +200,7 @@ export function LeadFinder({ googleMaps, ai }: { googleMaps: boolean; ai: Record
         </form>
         {!googleMaps && (
           <p className="mt-4 text-xs text-slate-500">
-            Searching OpenStreetMap (free, but it knows fewer businesses and has no reviews). Add a Google Maps key for far better results — SETUP.md, step 8.
+            Searching OpenStreetMap (free, but it knows fewer businesses, has no reviews, and searches one town at a time). Add a Google Maps key for far better results — SETUP.md, step 8.
           </p>
         )}
       </Card>

@@ -8,6 +8,9 @@ import { isGoogleMapsOn } from "@/lib/leads/search";
 
 export const metadata: Metadata = { title: "Lead finder" };
 
+// The free map search can take over a minute when its servers are busy.
+export const maxDuration = 120;
+
 export default function LeadFinderPage() {
   return (
     <Suspense fallback={<PageSkeleton />}>

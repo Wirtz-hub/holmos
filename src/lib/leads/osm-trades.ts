@@ -67,5 +67,12 @@ export function overpassQuery(filters: ReturnType<typeof osmFilters>, box: [numb
   if (filters.namePattern.length >= 3) {
     parts.push(`nwr["name"~"${filters.namePattern}",i][~"^(amenity|shop|craft|office|healthcare|leisure|tourism)$"~"."](${b});`);
   }
-  return `[out:json][timeout:50];(${parts.join("")});out center tags ${limit};`;
+  return `[out:json][timeout:80];(${parts.join("")});out center tags ${limit};`;
+}
+
+/** The English word for a trade, which OpenStreetMap's place search understands best ("tandlæger" → "dentist"). */
+export function englishTrade(trade: string) {
+  const text = trade.trim().toLowerCase();
+  const match = TRADES.find((t) => t.words.some((word) => text.startsWith(word) || (text.length >= 4 && word.startsWith(text))));
+  return match?.words[0] ?? trade.trim();
 }
