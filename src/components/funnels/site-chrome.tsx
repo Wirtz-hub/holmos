@@ -6,6 +6,8 @@ import { publicText } from "@/lib/public-text";
 
 // The menu along the top and the footer along the bottom of a website.
 
+const UNSPLASH_UTM = "utm_source=holmos&utm_medium=referral";
+
 function menuItems(ctx: FunnelContext) {
   return ctx.doc.steps
     .map((step, index) => ({ step, index }))
@@ -130,19 +132,24 @@ export function SiteFooter({ ctx }: { ctx: FunnelContext }) {
       )}
       {credits.length > 0 && (
         <p className={cx("mx-auto max-w-6xl px-4 pb-6 text-xs @2xl:px-6", footer.enabled ? "" : "pt-6", muted(ctx))}>
-          {text.photosFrom}:{" "}
+          {/* Unsplash's rule: "Photos by <photographer> on Unsplash", both linked. */}
+          {text.photosBy}{" "}
           {credits.map((c, i) => (
             <span key={c.name}>
               {i > 0 && ", "}
               {c.link ? (
-                <a href={`${c.link}?utm_source=holmos&utm_medium=referral`} target="_blank" rel="noopener" className="underline">
+                <a href={`${c.link}?${UNSPLASH_UTM}`} target="_blank" rel="noopener" className="underline">
                   {c.name}
                 </a>
               ) : (
                 c.name
               )}
             </span>
-          ))}
+          ))}{" "}
+          {text.photosOn}{" "}
+          <a href={`https://unsplash.com/?${UNSPLASH_UTM}`} target="_blank" rel="noopener" className="underline">
+            Unsplash
+          </a>
         </p>
       )}
     </footer>
