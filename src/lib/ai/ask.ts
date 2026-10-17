@@ -9,7 +9,12 @@ import { serverEnv } from "@/lib/env";
 export type AiProvider = "claude" | "gemini";
 
 const CLAUDE_MODEL = "claude-opus-5-5";
-const geminiModel = () => process.env.GEMINI_MODEL || "gemini-3.8-flash";
+// Free Gemini models, tried in order: when one is overloaded or out of free
+// quota, the next one usually isn't. GEMINI_MODEL, if set, goes first.
+const GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+const geminiModels = () => [...new Set([process.env.GEMINI_MODEL, ...GEMINI_MODELS].filter((model): model is string => Boolean(model)))];
+/** Answers that mean "try another model": unknown model, out of quota, overloaded. */
+const TRY_NEXT = new Set([404, 429, 500, 502, 503, 504]);
 
 /** Which AIs have a key set. */
 export function aiProviders(): Record<AiProvider, boolean> {
@@ -67,8 +72,8 @@ type GeminiResponse = {
 };
 
 async function askGemini(req: AiRequest): Promise<unknown> {
-  const call = (withSchema: boolean) =>
-    fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel())}:generateContent`, {
+  const call = (model: string, withSchema: boolean) =>
+    fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": serverEnv().geminiApiKey },
       cache: "no-store",
@@ -89,20 +94,26 @@ async function askGemini(req: AiRequest): Promise<unknown> {
       }),
     });
 
-  let res: Response;
+  let res: Response | undefined;
+  const models = geminiModels();
   try {
-    res = await call(true);
-    // A model that won't take the schema field gets the schema in the message instead.
-    if (res.status === 400) res = await call(false);
+    for (const model of models) {
+      res = await call(model, true);
+      // A model that won't take the schema field gets the schema in the message instead.
+      if (res.status === 400) res = await call(model, false);
+      if (!TRY_NEXT.has(res.status)) break;
+    }
   } catch {
     throw new AiError("Couldn't reach Gemini. Try again in a moment.");
   }
+  if (!res) throw new AiError("Couldn't reach Gemini. Try again in a moment.");
   const body = (await res.json().catch(() => ({}))) as GeminiResponse;
   if (res.status === 429) {
     throw new AiError("Gemini's free limit is used up for now. Wait a minute (or until tomorrow) and try again, or use Claude.");
   }
+  if (res.status >= 500) throw new AiError("All of Gemini's free models are overloaded right now. Try again in a few minutes, or use Claude.");
   if (res.status === 401 || res.status === 403) throw new AiError("Gemini didn't accept the API key. Check GEMINI_API_KEY in Vercel.");
-  if (res.status === 404) throw new AiError(`Gemini doesn't know the model "${geminiModel()}". Set GEMINI_MODEL to a current model name.`);
+  if (res.status === 404) throw new AiError(`Gemini doesn't know the models ${models.join(", ")}. Set GEMINI_MODEL to a current model name.`);
   if (!res.ok) throw new AiError(`Gemini had a problem (${res.status}${body.error?.message ? `: ${body.error.message}` : ""}).`);
   if (body.promptFeedback?.blockReason) throw new AiError(`Gemini declined to ${req.task}. Try rewording it.`);
 
