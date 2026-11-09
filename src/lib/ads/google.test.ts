@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoogleAccountMetrics, listGoogleAdAccounts, parseGoogleMetrics, type GoogleConfig } from "@/lib/ads/google";
+import { fetchGoogleAccountMetrics, fetchGoogleInsights, listGoogleAdAccounts, parseGoogleMetrics, type GoogleConfig } from "@/lib/ads/google";
 import { AdPlatformError } from "@/lib/ads/types";
 
 const cfg: GoogleConfig = { clientId: "cid", clientSecret: "secret", developerToken: "dev-token", version: "v25" };
@@ -85,6 +85,34 @@ describe("fetchGoogleAccountMetrics", () => {
     await expect(
       fetchGoogleAccountMetrics(cfg, "access", "1234567890", null, { from: "2026-10-01", to: "2026-10-01" }),
     ).rejects.toThrow(/only works with test accounts/);
+  });
+});
+
+describe("fetchGoogleInsights", () => {
+  it("queries campaign metrics and purchase categories with search, never a mutate call", async () => {
+    const calls = mockFetch((_url, body) => {
+      if (body?.query.includes("conversion_action_category")) {
+        return { results: [{ campaign: { id: "9", name: "Search" }, segments: { date: "2026-10-01", conversionActionCategory: "PURCHASE" }, metrics: { conversions: 1, conversionsValue: 40 } }] };
+      }
+      return { results: [{ campaign: { id: "9", name: "Search" }, segments: { date: "2026-10-01" }, metrics: { costMicros: "1000000", impressions: "10", clicks: "1" } }] };
+    });
+    const { base, conversions } = await fetchGoogleInsights(cfg, "access", "1234567890", "999", "campaign", { from: "2026-10-01", to: "2026-10-07" }, { pause: async () => undefined });
+    expect(base).toHaveLength(1);
+    expect(conversions).toHaveLength(1);
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.url.endsWith("/customers/1234567890/googleAds:search"))).toBe(true);
+    expect(calls.every((call) => !call.url.includes("mutate"))).toBe(true);
+    const queries = calls.map((call) => JSON.parse(call.init.body as string).query as string);
+    expect(queries[0]).toContain("FROM campaign");
+    expect(queries[0]).toContain("metrics.cost_micros");
+    expect(queries[1]).toContain("segments.conversion_action_category");
+    expect(queries.every((query) => !/\b(update|remove|create|mutate)\b/i.test(query))).toBe(true);
+  });
+
+  it("rejects an account id that is not digits, so it can never be interpolated into a query", async () => {
+    await expect(
+      fetchGoogleInsights(cfg, "access", "123; drop", null, "account", { from: "2026-10-01", to: "2026-10-01" }),
+    ).rejects.toThrow(/isn't valid/);
   });
 });
 

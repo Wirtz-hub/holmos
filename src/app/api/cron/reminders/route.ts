@@ -1,7 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import { sendDueReminders } from "@/lib/booking/server";
+import { authorisedCron } from "@/lib/cron";
 import { isEmailConfigured } from "@/lib/email";
-import { serverEnv } from "@/lib/env";
 import { json } from "@/lib/request";
 
 // Booking reminders, run by Vercel's cron job (see vercel.json). Not a login
@@ -9,16 +8,8 @@ import { json } from "@/lib/request";
 
 export const maxDuration = 60;
 
-function authorised(request: Request) {
-  const secret = serverEnv().cronSecret;
-  if (!secret) return false;
-  const given = Buffer.from(request.headers.get("authorization") ?? "");
-  const expected = Buffer.from(`Bearer ${secret}`);
-  return given.length === expected.length && timingSafeEqual(given, expected);
-}
-
 export async function GET(request: Request) {
-  if (!authorised(request)) return json({ ok: false }, 401);
+  if (!authorisedCron(request)) return json({ ok: false }, 401);
   if (!isEmailConfigured()) return json({ ok: true, skipped: "Email isn't set up yet." });
   try {
     return json({ ok: true, ...(await sendDueReminders()) });

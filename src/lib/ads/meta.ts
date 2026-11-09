@@ -1,6 +1,14 @@
 import { createHmac } from "node:crypto";
-import type { DateRange } from "@/lib/dates";
-import { AdPlatformError, type AccountMetrics, type DailyMetrics, type DiscoveredAdAccount } from "@/lib/ads/types";
+import { isValidIsoDate, type DateRange } from "@/lib/dates";
+import {
+  AdPlatformError,
+  InsightTruncatedError,
+  type AccountMetrics,
+  type DailyMetrics,
+  type DiscoveredAdAccount,
+  type InsightLevel,
+} from "@/lib/ads/types";
+import type { MetaInsightEntity } from "@/lib/ads/insights";
 
 // Meta Marketing API (Graph API). Docs: developers.facebook.com/docs/marketing-api
 
@@ -24,19 +32,39 @@ type GraphError = { message?: string; code?: number; error_subcode?: number; typ
 
 function toPlatformError(error: GraphError | undefined, status: number): AdPlatformError {
   const code = error?.code;
+  const message = error?.message ?? "";
+  if (code === 1 && /reduce the amount of data/i.test(message)) return new InsightTruncatedError();
   if (code === 190 || code === 102 || status === 401) {
     return new AdPlatformError("Meta login has expired or was revoked. Reconnect Meta on the Ad accounts page.", true);
   }
-  if (code === 4 || code === 17 || code === 32 || code === 613 || code === 80004) {
-    return new AdPlatformError("Meta is limiting requests right now. Try again in a few minutes.");
+  // 4/17/32/613 and the 8000x codes are Marketing API rate limits. 5xx is usually transient.
+  if (
+    code === 4 ||
+    code === 17 ||
+    code === 32 ||
+    code === 613 ||
+    code === 80000 ||
+    code === 80003 ||
+    code === 80004 ||
+    code === 80014 ||
+    status === 429
+  ) {
+    return new AdPlatformError("Meta is limiting requests right now. Try again in a few minutes.", false, true);
   }
   if (code === 10 || code === 200 || code === 275) {
     return new AdPlatformError("The connected Meta login doesn't have permission to read this ad account.");
   }
-  return new AdPlatformError(`Meta said: ${error?.message ?? `request failed (${status})`}`);
+  if (status === 500 || status === 502 || status === 503 || status === 504) {
+    return new AdPlatformError(`Meta said: ${message || `request failed (${status})`}`, false, true);
+  }
+  return new AdPlatformError(`Meta said: ${message || `request failed (${status})`}`);
 }
 
-async function graph<T>(cfg: MetaConfig, url: URL, accessToken?: string): Promise<T> {
+type GraphOptions = { retries?: number; pause?: (ms: number) => Promise<void> };
+
+const defaultPause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function graphOnce<T>(cfg: MetaConfig, url: URL, accessToken?: string): Promise<T> {
   const headers: HeadersInit = {};
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
@@ -44,7 +72,8 @@ async function graph<T>(cfg: MetaConfig, url: URL, accessToken?: string): Promis
   }
   let res: Response;
   try {
-    res = await fetch(url, { headers, cache: "no-store" });
+    // GET only. Insights, account lists and token exchange never mutate an ad.
+    res = await fetch(url, { method: "GET", headers, cache: "no-store" });
   } catch {
     throw new AdPlatformError("Couldn't reach Meta. Check your internet connection and try again.");
   }
@@ -53,16 +82,41 @@ async function graph<T>(cfg: MetaConfig, url: URL, accessToken?: string): Promis
   return body;
 }
 
-async function graphAll<T>(cfg: MetaConfig, url: URL, accessToken: string): Promise<T[]> {
+async function graph<T>(cfg: MetaConfig, url: URL, accessToken?: string, options?: GraphOptions): Promise<T> {
+  const retries = options?.retries ?? 0;
+  const pause = options?.pause ?? defaultPause;
+  let last: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await graphOnce<T>(cfg, url, accessToken);
+    } catch (error) {
+      last = error;
+      if (!(error instanceof AdPlatformError) || !error.retryable || attempt === retries) throw error;
+      await pause(1_000 * 2 ** attempt);
+    }
+  }
+  throw last;
+}
+
+async function graphAll<T>(
+  cfg: MetaConfig,
+  url: URL,
+  accessToken: string,
+  options?: GraphOptions & { maxPages?: number; strict?: boolean },
+): Promise<T[]> {
   const items: T[] = [];
+  const maxPages = options?.maxPages ?? MAX_PAGES;
   let next: URL | null = url;
-  for (let page = 0; next && page < MAX_PAGES; page++) {
-    const body: { data?: T[]; paging?: { next?: string } } = await graph(cfg, next, accessToken);
+  let page = 0;
+  while (next && page < maxPages) {
+    const body: { data?: T[]; paging?: { next?: string } } = await graph(cfg, next, accessToken, options);
     items.push(...(body.data ?? []));
     next = body.paging?.next ? new URL(body.paging.next) : null;
     // Never forward a token that Meta may have echoed into the next-page URL.
     next?.searchParams.delete("access_token");
+    page += 1;
   }
+  if (next && options?.strict) throw new InsightTruncatedError();
   return items;
 }
 
@@ -221,4 +275,44 @@ export async function fetchMetaAccountMetrics(
     daily: parseMetaInsights(dailyRows),
     reach: totalRows.length ? num(totalRows[0].reach) : 0,
   };
+}
+
+const INSIGHT_FIELDS: Record<InsightLevel, string> = {
+  account: "account_id,account_name,spend,impressions,reach,clicks,inline_link_clicks,actions,action_values",
+  campaign: "campaign_id,campaign_name,spend,impressions,reach,clicks,inline_link_clicks,actions,action_values",
+  adset: "campaign_id,adset_id,adset_name,spend,impressions,reach,clicks,inline_link_clicks,actions,action_values",
+  ad: "campaign_id,adset_id,ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,actions,action_values",
+};
+
+/**
+ * Daily insights for one level. Read-only: this only GETs `act_…/insights`.
+ * Pages until Meta is done, and retries rate limits. Throws InsightTruncatedError
+ * if the date range is too wide to read completely — the caller splits it.
+ */
+export async function fetchMetaInsights(
+  cfg: MetaConfig,
+  accessToken: string,
+  externalAccountId: string,
+  level: InsightLevel,
+  range: DateRange,
+  options?: GraphOptions & { maxPages?: number },
+): Promise<MetaInsightEntity[]> {
+  const accountId = externalAccountId.replace(/^act_/, "");
+  if (!/^\d+$/.test(accountId)) throw new AdPlatformError("This Meta ad account id isn't valid.");
+  if (!isValidIsoDate(range.from) || !isValidIsoDate(range.to) || range.from > range.to) {
+    throw new AdPlatformError("Invalid date range.");
+  }
+  return graphAll<MetaInsightEntity>(
+    cfg,
+    graphUrl(cfg, `act_${accountId}/insights`, {
+      level,
+      fields: INSIGHT_FIELDS[level],
+      time_increment: "1",
+      time_range: JSON.stringify({ since: range.from, until: range.to }),
+      use_account_attribution_setting: "true",
+      limit: "500",
+    }),
+    accessToken,
+    { retries: options?.retries ?? 4, pause: options?.pause, maxPages: options?.maxPages ?? 40, strict: true },
+  );
 }

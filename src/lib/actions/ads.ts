@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
 import { refreshConnectionAccounts } from "@/lib/ads/connections";
+import { syncAdInsights } from "@/lib/ads/sync";
 import { AdPlatformError } from "@/lib/ads/types";
 
 const idSchema = z.uuid();
@@ -38,6 +39,19 @@ export async function refreshConnectionAction(connectionId: string) {
       ok: false,
       message: error instanceof AdPlatformError ? error.message : "Couldn't check for new accounts. Try again.",
     };
+  }
+}
+
+/** Pull the last 30 days of performance into the database. Read-only towards the ad platforms. */
+export async function syncInsightsAction() {
+  await requireAdmin();
+  try {
+    const result = await syncAdInsights({ backfill: true });
+    refresh();
+    return { ok: result.ok, message: result.message };
+  } catch (error) {
+    console.error("Manual ad insight sync failed", error);
+    return { ok: false, message: "Couldn't sync ad performance. Try again." };
   }
 }
 

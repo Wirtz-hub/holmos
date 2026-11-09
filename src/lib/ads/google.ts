@@ -1,6 +1,14 @@
-import type { DateRange } from "@/lib/dates";
+import { isValidIsoDate, type DateRange } from "@/lib/dates";
 import { formatCustomerId } from "@/lib/ads/display";
-import { AdPlatformError, type AccountMetrics, type DailyMetrics, type DiscoveredAdAccount } from "@/lib/ads/types";
+import type { GoogleInsightEntity } from "@/lib/ads/insights";
+import {
+  AdPlatformError,
+  InsightTruncatedError,
+  type AccountMetrics,
+  type DailyMetrics,
+  type DiscoveredAdAccount,
+  type InsightLevel,
+} from "@/lib/ads/types";
 
 // Google Ads API (REST). Docs: developers.google.com/google-ads/api
 
@@ -112,10 +120,14 @@ const FRIENDLY_GOOGLE_ERRORS: Record<string, string> = {
 function toPlatformError(body: GoogleAdsErrorBody, status: number): AdPlatformError {
   const detail = body.error?.details?.flatMap((d) => d.errors ?? [])[0];
   const code = detail?.errorCode ? Object.values(detail.errorCode)[0] : undefined;
+  if (code === "RESOURCE_EXHAUSTED" || status === 429) {
+    return new AdPlatformError(FRIENDLY_GOOGLE_ERRORS.RESOURCE_EXHAUSTED, false, true);
+  }
   if (code && FRIENDLY_GOOGLE_ERRORS[code]) return new AdPlatformError(FRIENDLY_GOOGLE_ERRORS[code]);
   if (status === 401) return new AdPlatformError("Google login has expired. Reconnect Google on the Ad accounts page.", true);
-  if (status === 429) return new AdPlatformError(FRIENDLY_GOOGLE_ERRORS.RESOURCE_EXHAUSTED);
-  return new AdPlatformError(`Google Ads said: ${detail?.message ?? body.error?.message ?? `request failed (${status})`}`);
+  const said = `Google Ads said: ${detail?.message ?? body.error?.message ?? `request failed (${status})`}`;
+  if (status === 500 || status === 502 || status === 503 || status === 504) return new AdPlatformError(said, false, true);
+  return new AdPlatformError(said);
 }
 
 function adsHeaders(cfg: GoogleConfig, accessToken: string, loginCustomerId?: string | null): HeadersInit {
@@ -140,13 +152,17 @@ async function adsFetch<T>(url: string, init: RequestInit): Promise<T> {
   return body;
 }
 
-/** Run a GAQL query and return every row across all pages. */
+/**
+ * Run a GAQL query and return every row across all pages.
+ * `googleAds:search` only reads. Nothing in this file calls a mutate method.
+ */
 export async function searchGoogleAds<T>(
   cfg: GoogleConfig,
   accessToken: string,
   customerId: string,
   loginCustomerId: string | null | undefined,
   query: string,
+  options?: { strict?: boolean },
 ): Promise<T[]> {
   const url = `https://googleads.googleapis.com/${cfg.version}/customers/${customerId}/googleAds:search`;
   const rows: T[] = [];
@@ -159,8 +175,9 @@ export async function searchGoogleAds<T>(
     });
     rows.push(...(body.results ?? []));
     pageToken = body.nextPageToken;
-    if (!pageToken) break;
+    if (!pageToken) return rows;
   }
+  if (pageToken && options?.strict) throw new InsightTruncatedError();
   return rows;
 }
 
@@ -305,4 +322,87 @@ export async function fetchGoogleAccountMetrics(
   ]);
 
   return { daily: parseGoogleMetrics(baseRows, conversionRows), reach: null };
+}
+
+const GOOGLE_FROM: Record<InsightLevel, string> = {
+  account: "customer",
+  campaign: "campaign",
+  adset: "ad_group",
+  ad: "ad_group_ad",
+};
+
+const GOOGLE_DIMENSIONS: Record<InsightLevel, string> = {
+  account: "customer.id, customer.descriptive_name",
+  campaign: "campaign.id, campaign.name",
+  adset: "campaign.id, ad_group.id, ad_group.name",
+  ad: "campaign.id, ad_group.id, ad_group_ad.ad.id, ad_group_ad.ad.name",
+};
+
+function assertDigits(id: string, label: string) {
+  if (!/^\d+$/.test(id)) throw new AdPlatformError(`This ${label} isn't valid.`);
+}
+
+const defaultPause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+async function searchWithRetry<T>(
+  cfg: GoogleConfig,
+  accessToken: string,
+  customerId: string,
+  loginCustomerId: string | null,
+  query: string,
+  pause: (ms: number) => Promise<void>,
+) {
+  let last: unknown;
+  for (let attempt = 0; attempt <= 4; attempt++) {
+    try {
+      return await searchGoogleAds<T>(cfg, accessToken, customerId, loginCustomerId, query, { strict: true });
+    } catch (error) {
+      last = error;
+      if (!(error instanceof AdPlatformError) || !error.retryable || attempt === 4) throw error;
+      await pause(1_000 * 2 ** attempt);
+    }
+  }
+  throw last;
+}
+
+/**
+ * Daily metrics for one level. Read-only GAQL against googleAds:search.
+ * Purchases are queried separately because Google won't mix conversion
+ * categories into the same request as cost and clicks.
+ */
+export async function fetchGoogleInsights(
+  cfg: GoogleConfig,
+  accessToken: string,
+  customerId: string,
+  loginCustomerId: string | null,
+  level: InsightLevel,
+  range: DateRange,
+  options?: { pause?: (ms: number) => Promise<void> },
+): Promise<{ base: GoogleInsightEntity[]; conversions: GoogleInsightEntity[] }> {
+  assertDigits(customerId, "Google Ads account id");
+  if (loginCustomerId) assertDigits(loginCustomerId, "Google Ads manager account id");
+  if (!isValidIsoDate(range.from) || !isValidIsoDate(range.to) || range.from > range.to) {
+    throw new AdPlatformError("Invalid date range.");
+  }
+  const pause = options?.pause ?? defaultPause;
+  const during = `segments.date BETWEEN '${range.from}' AND '${range.to}'`;
+  const from = GOOGLE_FROM[level];
+  const dimensions = GOOGLE_DIMENSIONS[level];
+  const base = await searchWithRetry<GoogleInsightEntity>(
+    cfg,
+    accessToken,
+    customerId,
+    loginCustomerId,
+    `SELECT ${dimensions}, segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks FROM ${from} WHERE ${during}`,
+    pause,
+  );
+  const conversions = await searchWithRetry<GoogleInsightEntity>(
+    cfg,
+    accessToken,
+    customerId,
+    loginCustomerId,
+    `SELECT ${dimensions}, segments.date, segments.conversion_action_category, metrics.conversions, metrics.conversions_value FROM ${from} WHERE ${during}`,
+    pause,
+  );
+  return { base, conversions };
 }
