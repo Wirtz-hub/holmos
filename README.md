@@ -49,6 +49,25 @@ AgencyAnalytics and AgencyFlow. One admin login today; built so client logins ca
   (public addresses only, size- and time-limited). The AI only writes content; layout comes
   from the same builder as the templates.
 
+## What's built (Instagram DMs)
+
+- **Connect** — a separate Facebook Login from the ads connection, for the Page linked to a
+  professional Instagram account (Business or Creator). Tokens are encrypted the same way as
+  ad logins. @holm_10 is the account this is for.
+- **Inbox** — conversations and messages (who, direction, text, attachment metadata, time,
+  read state), linked to an existing contact when their notes or website contain that
+  Instagram handle.
+- **Webhooks and a daily sync** — Meta notifies HolmOS of new messages; a daily job copies
+  recent threads again. The same message is never stored twice.
+- **Drafts** — the inbox bot (or you) can write a follow-up. It is sent only after you press
+  Approve and then Send. Nothing is sent automatically. Outside Instagram's 24-hour window,
+  Send explains why and does not call Instagram.
+- **Bot read API** — `INBOX_API_SECRET` can list threads and create drafts. It cannot approve
+  or send.
+
+Setup for Frederik is in [SETUP.md](SETUP.md) (section 9), including what works in Meta's
+development mode before App Review.
+
 ## Roadmap
 
 1. ~~CRM + ad dashboards~~
@@ -56,7 +75,8 @@ AgencyAnalytics and AgencyFlow. One admin login today; built so client logins ca
 3. Websites and contact lists for clients (done); email/SMS broadcasts, drip sequences,
    tagging, visual workflow builder
 4. Google review requests and monitoring; Stripe invoices and payment links
-5. Unified inbox (Instagram DM, SMS, email) with AI agent; courses; surveys; social planner
+5. Unified inbox — Instagram DMs are in (read, draft, approve, then send); SMS and email still
+   to come, then the AI agent on top; courses; surveys; social planner
 
 Out of scope for now: client self-service logins (designed for, not built), ad platforms
 beyond Meta and Google, white-labelling, native mobile app.
@@ -89,6 +109,11 @@ Supabase (Postgres + Auth), Recharts, dnd-kit. Hosted on Vercel.
 | `src/lib/public-data.ts` | What public pages read (published content only, cached, refreshed on publish) |
 | `src/app/f/`, `src/app/sites/`, `src/app/book/`, `src/app/embed/`, `src/app/api/public/` | **Public** pages and endpoints — the only routes without `requireAdmin()` |
 | `src/app/api/cron/reminders/` | Daily reminder job (checks `CRON_SECRET`); scheduled in `vercel.json` |
+| `src/app/api/cron/instagram/` | Daily backfill of Instagram threads (same `CRON_SECRET`) |
+| `src/app/api/instagram/webhook/` | Meta webhook for new DMs (verify token + app-secret signature) |
+| `src/app/api/inbox/` | Secret read API for the inbox bot: threads and drafts, no sending |
+| `src/app/api/oauth/instagram/` | Facebook Login for the Instagram messaging connection |
+| `src/lib/instagram/` | Instagram Messaging API, sync, webhook parsing, the 24-hour window, approved sends |
 | `src/lib/ads/` | Meta + Google API clients, OAuth, token storage, result mapping, report aggregation |
 | `src/app/(app)/` | Signed-in pages |
 | `src/app/api/oauth/[platform]/` | OAuth start + callback for `meta` and `google` |
@@ -109,6 +134,13 @@ Supabase (Postgres + Auth), Recharts, dnd-kit. Hosted on Vercel.
   their blocked time (meeting plus buffers) under an exclusion constraint, so two confirmed
   bookings can never overlap.
 - `calendar_connections` — the one Google Calendar login; tokens handled like `ad_connections`.
+- `instagram_connections` — one Facebook login per professional Instagram account. The Page
+  token is encrypted like `ad_connections` and is not readable by a logged-in session.
+- `dm_conversations` / `dm_messages` — copied Instagram threads. `contact_id` points at an
+  existing contact when the handle matches. Deleting that contact does not delete the thread.
+- `dm_drafts` — follow-up text with status `draft`, `approved`, `rejected` or `sent`. A row
+  can only become `sent` through `mark_dm_draft_sent()`, and only after an admin has approved
+  it. The service key cannot approve.
 - `contacts` / `contact_events` — each client's own contact list and its history. Funnels and
   forms have an optional `client_id`; answers to a client's form go through `upsert_contact()`
   instead of `upsert_lead()`. Readable through `can_view_client()`, so future client logins

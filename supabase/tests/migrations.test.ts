@@ -474,3 +474,105 @@ describe("client contact lists", () => {
     expect(after.client_id).not.toBeNull();
   });
 });
+
+describe("instagram inbox", () => {
+  it("hides tokens and the whole inbox from visitors and non-admins", async () => {
+    await asServer(
+      "insert into public.instagram_connections (external_user_id, label, ig_user_id, ig_username, page_id, page_access_token_enc) values ('fb-1', 'Frederik', 'ig-1', 'holm_10', 'page-1', 'v1.sealed')",
+    );
+    await expect(as(ADMIN, "select page_access_token_enc from public.instagram_connections")).rejects.toThrow(/permission denied/);
+    await expect(as(ADMIN, "select user_access_token_enc from public.instagram_connections")).rejects.toThrow(/permission denied/);
+    expect(await as(ADMIN, "select ig_username, status from public.instagram_connections")).toEqual([
+      { ig_username: "holm_10", status: "active" },
+    ]);
+    for (const table of ["instagram_connections", "dm_conversations", "dm_messages", "dm_drafts"]) {
+      await expect(asVisitor(`select * from public.${table}`)).rejects.toThrow(/permission denied/);
+    }
+    expect(await as(OTHER, "select ig_username from public.instagram_connections")).toEqual([]);
+    await expect(asVisitor("select public.claim_dm_draft_send('00000000-0000-4000-8000-000000000001')")).rejects.toThrow(/permission denied/);
+    await expect(as(ADMIN, "select public.mark_dm_draft_sent('00000000-0000-4000-8000-000000000001', 'm', null)")).rejects.toThrow(
+      /permission denied/,
+    );
+  });
+
+  it("lets an admin approve a draft, and only the send function can mark it sent", async () => {
+    const [connection] = await asServer<{ id: string }>("select id from public.instagram_connections where ig_user_id = 'ig-1'");
+    const [conversation] = await asServer<{ id: string }>(
+      "insert into public.dm_conversations (connection_id, thread_id, participant_id, participant_username) values ($1, 'thread-1', 'person-1', 'brand') returning id",
+      [connection.id],
+    );
+    const [draft] = await as<{ id: string; status: string; approved_by: string | null }>(
+      ADMIN,
+      "insert into public.dm_drafts (conversation_id, body, source) values ($1, 'Hello there', 'bot') returning id, status, approved_by",
+      [conversation.id],
+    );
+    expect(draft).toMatchObject({ status: "draft", approved_by: null });
+    await expect(
+      as(ADMIN, "insert into public.dm_drafts (conversation_id, body, status) values ($1, 'Nope', 'sent')", [conversation.id]),
+    ).rejects.toThrow(/dm_draft_must_start_as_draft/);
+    await expect(
+      as(ADMIN, "insert into public.dm_drafts (conversation_id, body) values ($1, $2)", [conversation.id, "x".repeat(1001)]),
+    ).rejects.toThrow(/check/);
+
+    await as(ADMIN, "update public.dm_drafts set status = 'approved', approved_by = $2 where id = $1", [draft.id, ADMIN]);
+    const [approved] = await as<{ status: string; approved_by: string }>(
+      ADMIN,
+      "select status, approved_by from public.dm_drafts where id = $1",
+      [draft.id],
+    );
+    expect(approved).toEqual({ status: "approved", approved_by: ADMIN });
+    await expect(as(ADMIN, "update public.dm_drafts set body = 'Changed' where id = $1", [draft.id])).rejects.toThrow(/dm_draft_body_locked/);
+    await expect(as(ADMIN, "update public.dm_drafts set status = 'sent' where id = $1", [draft.id])).rejects.toThrow(
+      /dm_draft_send_requires_approval_action/,
+    );
+
+    const [second] = await asServer<{ id: string }>(
+      "insert into public.dm_drafts (conversation_id, body) values ($1, 'Service key draft') returning id",
+      [conversation.id],
+    );
+    await expect(asServer("update public.dm_drafts set status = 'approved' where id = $1", [second.id])).rejects.toThrow(
+      /dm_draft_approval_requires_admin/,
+    );
+
+    const claimed = await asServer<{ body: string }>("select body from public.claim_dm_draft_send($1)", [draft.id]);
+    expect(claimed[0].body).toBe("Hello there");
+    await expect(asServer("select body from public.claim_dm_draft_send($1)", [draft.id])).rejects.toThrow(/dm_draft_not_sendable/);
+    await asServer("select public.mark_dm_draft_sent($1, 'mid-9', $2)", [draft.id, ADMIN]);
+    expect(await as<{ status: string; external_message_id: string }>(ADMIN, "select status, external_message_id from public.dm_drafts where id = $1", [draft.id])).toEqual([
+      { status: "sent", external_message_id: "mid-9" },
+    ]);
+    await expect(asServer("select public.mark_dm_draft_sent($1, 'mid-again', $2)", [draft.id, ADMIN])).rejects.toThrow(/dm_draft_not_approved/);
+
+    await asServer(
+      "insert into public.dm_messages (conversation_id, external_id, direction, body, sent_at) values ($1, 'm1', 'inbound', 'Hi', now())",
+      [conversation.id],
+    );
+    await expect(
+      asServer(
+        "insert into public.dm_messages (conversation_id, external_id, direction, body, sent_at) values ($1, 'm1', 'inbound', 'Hi again', now())",
+        [conversation.id],
+      ),
+    ).rejects.toThrow(/duplicate key/);
+
+    expect(await as(OTHER, "select id from public.dm_conversations")).toEqual([]);
+    expect(await as(OTHER, "select id from public.dm_drafts")).toEqual([]);
+  });
+
+  it("keeps the conversation when a linked contact is removed", async () => {
+    const [conversation] = await as<{ id: string }>(ADMIN, "select id from public.dm_conversations where thread_id = 'thread-1'");
+    const [client] = await as<{ id: string }>(ADMIN, "insert into public.clients (name) values ('Linked brand') returning id");
+    const [contact] = await as<{ id: string }>(
+      ADMIN,
+      "insert into public.contacts (client_id, name, notes) values ($1, 'Brand', 'https://instagram.com/brand') returning id",
+      [client.id],
+    );
+    await asServer("update public.dm_conversations set contact_id = $1 where id = $2", [contact.id, conversation.id]);
+    await as(ADMIN, "delete from public.contacts where id = $1", [contact.id]);
+    const [kept] = await as<{ id: string; contact_id: string | null }>(
+      ADMIN,
+      "select id, contact_id from public.dm_conversations where id = $1",
+      [conversation.id],
+    );
+    expect(kept).toEqual({ id: conversation.id, contact_id: null });
+  });
+});

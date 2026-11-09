@@ -369,10 +369,109 @@ businesses, so normal use stays free). It still needs a payment card on the proj
 business's website, finds the owner or manager if the site names them, and writes a short
 first email from you. Always read it before sending.
 
+## 9. Instagram DMs (@holm_10)
+
+This copies Instagram direct messages into HolmOS so an inbox bot can draft a follow-up.
+You approve a draft, then press **Send**. HolmOS never replies by itself.
+
+Use the same Meta app as ads (section 3). Instagram uses a **separate** login, so the ads
+connection and its permissions stay as they are.
+
+### 9a. The Instagram account and a Facebook Page
+
+1. On your phone, open Instagram as **@holm_10** → **Settings → Account type and tools →
+   Switch to professional account**. Choose **Business** (Creator also works).
+2. Still in Instagram: **Settings → Account Centre** (or **Linked accounts**) → connect a
+   **Facebook Page**. Create a Page for HolmNordic if you don't have one, and make sure the
+   Facebook user you'll log in with can **message as that Page** (Page access: full control,
+   or the Message task).
+
+### 9b. The Meta app
+
+1. Open the HolmOS app at [developers.facebook.com](https://developers.facebook.com).
+2. Add the products the dashboard offers for messaging. You want **Instagram** (the Instagram
+   API with Facebook Login) and the webhook product. If it asks you to add **Facebook Login**
+   as well as the existing **Facebook Login for Business**, add it — ads keep using the
+   business configuration; Instagram does not.
+3. *Facebook Login → Settings* (the standard one, not the ads configuration): turn on
+   **Client OAuth login** and **Web OAuth login**. Under **Valid OAuth Redirect URIs** add
+   `https://YOUR-APP-ADDRESS/api/oauth/instagram/callback` and, if you test on your computer,
+   `http://localhost:3000/api/oauth/instagram/callback`. Save.
+4. If the app only allows **Facebook Login for Business** configurations (no plain scope
+   list), create a **second** configuration. Do not edit the ads one. Name it "HolmOS
+   Instagram", choose **User access token**, and include:
+   - `instagram_basic`
+   - `instagram_manage_messages`
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_metadata`
+   - `pages_messaging`
+
+   Copy that configuration's ID into `META_INSTAGRAM_LOGIN_CONFIG_ID`. Leave this empty when
+   the standard Facebook Login above is available — HolmOS then asks for those permissions
+   itself.
+5. *Webhooks* (Instagram object, not the Page object):
+   - **Callback URL:** `https://YOUR-APP-ADDRESS/api/instagram/webhook`
+   - **Verify token:** a random password of 32+ characters. Put the same value in
+     `META_WEBHOOK_VERIFY_TOKEN`.
+   - Subscribe to the fields **messages** and **messaging_seen**.
+6. Add to Vercel and redeploy:
+
+   | Setting | Value |
+   |---|---|
+   | `META_APP_ID` / `META_APP_SECRET` | Already set for ads |
+   | `META_WEBHOOK_VERIFY_TOKEN` | The verify token from step 5 |
+   | `INBOX_API_SECRET` | A different random password. The inbox bot sends `Authorization: Bearer <this>` |
+   | `META_INSTAGRAM_LOGIN_CONFIG_ID` | Only the Instagram configuration from step 4, never the ads configuration |
+
+7. Update the database: open `supabase/migrations/0004_instagram_dms.sql`, copy it all into
+   the Supabase SQL editor, and run it **once**. It only adds tables. It does not change or
+   delete existing clients, contacts or ad data. A second run stops with "already exists",
+   which is harmless.
+8. In HolmOS open **Instagram** in the sidebar → **Connect Instagram** and log in with the
+   Facebook user that manages the Page. You should see **@holm_10**. Press **Sync now** to
+   copy recent threads. A sync stores the latest 20 messages of each recent conversation
+   (Meta does not return older ones). New messages after that arrive through the webhook.
+
+### 9c. What works before App Review
+
+Meta splits "I am testing my own account" from "I can read messages from the public".
+
+- **Development mode, you are an admin of the app:** connecting @holm_10 works. Sync and
+  webhooks only include people who also have a role on the app (Admin, Developer or Tester).
+  Add a second Instagram account you control as a Tester, message @holm_10 from it, and that
+  thread shows up. Messages from leads who are not testers do **not** arrive yet.
+- **Webhooks:** Meta only delivers them after the app is switched to **Live**, even before
+  review. Until you do that, use **Sync now**. Sync has the same tester limit.
+- **App Review:** request Advanced access for `instagram_manage_messages`, `instagram_basic`,
+  `pages_manage_metadata`, `pages_messaging`, `pages_show_list` and `pages_read_engagement`.
+  The app should be owned by the verified HolmNordic business. Describe it as a private
+  inbox for your own agency account: a person approves every reply, and the app does not
+  message anyone on its own. After approval, switch the app to Live if it isn't already.
+  Threads with the public then sync and webhooks include them.
+- Sending still only works inside **24 hours** of the other person's last message. HolmOS
+  shows that on the conversation and refuses to send outside it. There is no automatic
+  follow-up.
+
+### 9d. What the inbox bot can call
+
+```
+GET  /api/inbox/threads?limit=20&messages=15
+GET  /api/inbox/threads/<conversation id>
+POST /api/inbox/drafts
+     { "conversation_id": "<uuid>", "text": "Thanks for the reply — shall we book a call?" }
+```
+
+Header on every call: `Authorization: Bearer <INBOX_API_SECRET>`.
+
+`POST` saves a draft with status `draft`. There is no send endpoint. You approve it in
+HolmOS, then press **Send**.
+
 ## Running it on your own computer (optional)
 
 Only needed for development. Install [Node.js](https://nodejs.org) (version 20 or newer), then
 in this folder: copy `.env.example` to `.env.local`, fill it in, and run `npm install` followed by
 `npm run dev`. Open http://localhost:3000. For Meta and Google to work locally, also add the
-`http://localhost:3000/api/oauth/…/callback` addresses in steps 3 and 4, and
-`http://localhost:3000/api/calendar/google/callback` in step 5d.
+`http://localhost:3000/api/oauth/…/callback` addresses in steps 3, 4 and 9, and
+`http://localhost:3000/api/calendar/google/callback` in step 5d. Instagram webhooks need a
+public address, so use **Sync now** when you are only on your computer.
