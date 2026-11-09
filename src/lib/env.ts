@@ -19,6 +19,12 @@ export function serverEnv() {
     metaAppSecret: process.env.META_APP_SECRET ?? "",
     metaLoginConfigId: process.env.META_LOGIN_CONFIG_ID ?? "",
     metaApiVersion: process.env.META_API_VERSION ?? "v26.0",
+    // Instagram DMs. A separate Login-for-Business configuration, if you use one.
+    // Leave empty to send the messaging permissions as a normal Facebook Login scope list.
+    metaInstagramLoginConfigId: process.env.META_INSTAGRAM_LOGIN_CONFIG_ID ?? "",
+    metaWebhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN ?? "",
+    // Lets the inbox bot read threads and save drafts. It cannot approve or send.
+    inboxApiSecret: process.env.INBOX_API_SECRET ?? "",
 
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
@@ -59,6 +65,21 @@ export function missingEmailSettings(): string[] {
     [
       ["RESEND_API_KEY", env.resendApiKey],
       ["EMAIL_FROM", env.emailFrom],
+    ] as [string, string][]
+  )
+    .filter(([, value]) => !value)
+    .map(([name]) => name);
+}
+
+/** Which settings are missing before Instagram DMs can be connected. */
+export function missingInstagramSettings(): string[] {
+  const env = serverEnv();
+  return (
+    [
+      ["META_APP_ID", env.metaAppId],
+      ["META_APP_SECRET", env.metaAppSecret],
+      ["SUPABASE_SECRET_KEY", env.supabaseSecretKey],
+      ["TOKEN_ENCRYPTION_KEY", env.tokenEncryptionKey],
     ] as [string, string][]
   )
     .filter(([, value]) => !value)

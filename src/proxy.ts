@@ -3,8 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { customDomainFor, isPassThroughPath } from "@/lib/hosts";
 
 // Pages anyone may open without signing in. Each one shows published content
-// only (landing pages, forms, booking pages) or checks its own secret (cron).
-const PUBLIC_PATHS = ["/f", "/book", "/embed", "/sites", "/api/public", "/api/cron"];
+// only (landing pages, forms, booking pages), checks its own secret (cron, the
+// inbox bot), or verifies a Meta webhook signature.
+const PUBLIC_PATHS = ["/f", "/book", "/embed", "/sites", "/api/public", "/api/cron", "/api/instagram", "/api/inbox"];
 
 const startsWithAny = (pathname: string, paths: string[]) =>
   paths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
