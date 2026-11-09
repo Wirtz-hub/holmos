@@ -15,6 +15,12 @@ AgencyAnalytics and AgencyFlow. One admin login today; built so client logins ca
 - **Per-client dashboards** — spend, impressions/reach, clicks/CTR, results mapped to the
   client's goal (lead, purchase, booking) and cost per result, with date-range filtering.
   Data is fetched live from the platforms for the selected range.
+- **Daily ad sync** — a Vercel cron job copies Meta performance into Postgres (account,
+  campaign, ad set and ad, one row per day) so other tools can query it. The first successful
+  run stores about 30 days; later runs refresh the last 7, because Meta revises recent days.
+  Read-only: it never creates, edits, pauses or spends. An admin can also press **Sync now**
+  on Ad accounts. Google Ads uses the same tables but stays switched off until
+  `GOOGLE_ADS_INSIGHTS_ENABLED=true` (it needs a developer token with Explorer or Basic access).
 
 ## What's built (Phase 2)
 
@@ -89,6 +95,7 @@ Supabase (Postgres + Auth), Recharts, dnd-kit. Hosted on Vercel.
 | `src/lib/public-data.ts` | What public pages read (published content only, cached, refreshed on publish) |
 | `src/app/f/`, `src/app/sites/`, `src/app/book/`, `src/app/embed/`, `src/app/api/public/` | **Public** pages and endpoints — the only routes without `requireAdmin()` |
 | `src/app/api/cron/reminders/` | Daily reminder job (checks `CRON_SECRET`); scheduled in `vercel.json` |
+| `src/app/api/cron/ad-insights/` | Daily Meta (and optional Google) performance copy; same `CRON_SECRET` |
 | `src/lib/ads/` | Meta + Google API clients, OAuth, token storage, result mapping, report aggregation |
 | `src/app/(app)/` | Signed-in pages |
 | `src/app/api/oauth/[platform]/` | OAuth start + callback for `meta` and `google` |
@@ -102,6 +109,16 @@ Supabase (Postgres + Auth), Recharts, dnd-kit. Hosted on Vercel.
   (`TOKEN_ENCRYPTION_KEY`) and their columns are not granted to logged-in sessions; only the
   server, using the Supabase secret key, reads them.
 - `ad_accounts` — one per platform account, with a nullable `client_id`.
+- `ad_insights_daily` — one row per account, campaign, ad set (or Google ad group) or ad, per day:
+  spend, impressions, reach, clicks, CTR (a ratio, not a percentage), CPC, CPM, purchases,
+  purchase value, ROAS, currency, plus the raw `actions` map. Upserted on
+  `(ad_account_id, level, external_id, insight_date)`. `conversions` equals `purchases`
+  (Meta's overlapping purchase action types are counted once).
+- `ad_insight_syncs` — whether that account has had its first 30-day pull, and the last error.
+- `ad_performance_summary` — last 7 and 30 complete days (ending yesterday, Europe/Copenhagen)
+  per account, campaign, ad set and ad. Bots can `select … where level = 'account'` or
+  `'campaign'`. The view runs as the querying user, so row-level security still applies.
+  Reach is a sum of daily reach, so the same person can count on more than one day.
 - `funnels` — a page or funnel: `draft` (what you edit) and `published` (what visitors see),
   both JSON validated by `src/lib/funnels/schema.ts`, plus an optional `custom_domain`.
 - `forms` / `form_submissions` — questions as JSON, and each answer as a label/value snapshot.

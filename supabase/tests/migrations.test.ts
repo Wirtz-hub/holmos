@@ -474,3 +474,79 @@ describe("client contact lists", () => {
     expect(after.client_id).not.toBeNull();
   });
 });
+
+describe("ad insight rows", () => {
+  const day = (offset: number) => `(timezone('Europe/Copenhagen', now()))::date - ${offset}`;
+
+  async function accountFor(clientId: string, externalId: string) {
+    const [account] = await asServer<{ id: string }>(
+      `insert into public.ad_accounts (platform, external_account_id, name, currency, client_id)
+       values ('meta', $1, 'Clinic', 'DKK', $2) returning id`,
+      [externalId, clientId],
+    );
+    return account.id;
+  }
+
+  async function putInsight(accountId: string, clientId: string, offset: number, spend: number, externalId = "acct") {
+    await asServer(
+      `insert into public.ad_insights_daily
+         (ad_account_id, client_id, platform, level, external_id, name, insight_date, spend, impressions, clicks, purchases, conversions, purchase_value, currency)
+       values ($1, $2, 'meta', 'account', $3, 'Clinic', ${day(offset)}, $4, 1000, 25, 2, 2, 80, 'DKK')`,
+      [accountId, clientId, externalId, spend],
+    );
+  }
+
+  it("upserts on the natural key and follows a client reassignment", async () => {
+    const [client] = await as<{ id: string }>(ADMIN, "insert into public.clients (name) values ('Insight Co') returning id");
+    const [other] = await as<{ id: string }>(ADMIN, "insert into public.clients (name) values ('Other Co') returning id");
+    const accountId = await accountFor(client.id, "insight-1");
+    await putInsight(accountId, client.id, 1, 10);
+    await asServer(
+      `insert into public.ad_insights_daily
+         (ad_account_id, client_id, platform, level, external_id, name, insight_date, spend, currency)
+       values ($1, $2, 'meta', 'account', 'acct', 'Clinic', ${day(1)}, 99, 'DKK')
+       on conflict (ad_account_id, level, external_id, insight_date)
+       do update set spend = excluded.spend`,
+      [accountId, client.id],
+    );
+    const rows = await as<{ spend: string }>(ADMIN, "select spend from public.ad_insights_daily where ad_account_id = $1", [accountId]);
+    expect(rows).toHaveLength(1);
+    expect(Number(rows[0].spend)).toBe(99);
+
+    await as(ADMIN, "update public.ad_accounts set client_id = $1 where id = $2", [other.id, accountId]);
+    const [moved] = await as<{ client_id: string }>(ADMIN, "select client_id from public.ad_insights_daily where ad_account_id = $1", [accountId]);
+    expect(moved.client_id).toBe(other.id);
+
+    await expect(as(ADMIN, "insert into public.ad_insights_daily (ad_account_id, platform, level, external_id, insight_date, currency) values ($1, 'meta', 'ad', 'x', current_date, 'DKK')", [accountId])).rejects.toThrow(/permission denied/);
+    await expect(asVisitor("select * from public.ad_insights_daily")).rejects.toThrow(/permission denied/);
+    await expect(as(OTHER, "select private.sync_ad_insight_client()")).rejects.toThrow(/permission denied/);
+  });
+
+  it("summarises the last 7 and 30 days and hides other clients' numbers", async () => {
+    const [client] = await as<{ id: string }>(ADMIN, "insert into public.clients (name) values ('Summary Co') returning id");
+    const accountId = await accountFor(client.id, "insight-2");
+    await putInsight(accountId, client.id, 1, 10);
+    await putInsight(accountId, client.id, 8, 100, "acct");
+    await putInsight(accountId, client.id, 40, 1000, "acct");
+
+    const [summary] = await as<{ spend_7d: string; spend_30d: string; purchases_7d: string; roas_7d: string; ctr_7d: string }>(
+      ADMIN,
+      "select spend_7d, spend_30d, purchases_7d, roas_7d, ctr_7d from public.ad_performance_summary where ad_account_id = $1 and level = 'account'",
+      [accountId],
+    );
+    expect(Number(summary.spend_7d)).toBe(10);
+    expect(Number(summary.spend_30d)).toBe(110);
+    expect(Number(summary.purchases_7d)).toBe(2);
+    // 80 purchase value / 10 spend on the only day inside 7 days.
+    expect(Number(summary.roas_7d)).toBeCloseTo(8);
+    expect(Number(summary.ctr_7d)).toBeCloseTo(0.025);
+
+    expect(await as(OTHER, "select spend_7d from public.ad_performance_summary")).toEqual([]);
+    await expect(asVisitor("select * from public.ad_performance_summary")).rejects.toThrow(/permission denied/);
+
+    await as(ADMIN, "insert into public.client_access (user_id, client_id) values ($1, $2) on conflict do nothing", [OTHER, client.id]);
+    await as(ADMIN, "update public.clients set portal_enabled = true where id = $1", [client.id]);
+    const visible = await as<{ spend_7d: string }>(OTHER, "select spend_7d from public.ad_performance_summary where client_id = $1", [client.id]);
+    expect(visible.map((row) => Number(row.spend_7d))).toEqual([10]);
+  });
+});

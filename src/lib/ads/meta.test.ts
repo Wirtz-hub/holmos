@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchMetaAccountMetrics, listMetaAdAccounts, metaAuthUrl, parseMetaInsights, type MetaConfig } from "@/lib/ads/meta";
+import { fetchMetaAccountMetrics, fetchMetaInsights, listMetaAdAccounts, metaAuthUrl, parseMetaInsights, type MetaConfig } from "@/lib/ads/meta";
+import { InsightTruncatedError } from "@/lib/ads/types";
 
 const cfg: MetaConfig = { appId: "app", appSecret: "app-secret", version: "v26.0" };
 
@@ -81,6 +82,47 @@ describe("fetchMetaAccountMetrics", () => {
     await expect(
       fetchMetaAccountMetrics(cfg, "old", "123", { from: "2026-10-01", to: "2026-10-01" }),
     ).rejects.toMatchObject({ needsReconnect: true });
+  });
+});
+
+describe("fetchMetaInsights", () => {
+  it("reads one level with GET, follows pages, and retries a rate limit", async () => {
+    let hits = 0;
+    const calls = mockFetch((url) => {
+      hits += 1;
+      if (hits === 1) return { status: 400, body: { error: { message: "Application request limit reached", code: 17 } } };
+      if (url.searchParams.get("after") === "p2") return { body: { data: [{ date_start: "2026-10-02", campaign_id: "c", spend: "1" }] } };
+      const next = new URL(url);
+      next.searchParams.set("after", "p2");
+      next.searchParams.set("access_token", "should-not-travel");
+      return { body: { data: [{ date_start: "2026-10-01", campaign_id: "c", spend: "2" }], paging: { next: next.toString() } } };
+    });
+    const pauses: number[] = [];
+    const rows = await fetchMetaInsights(cfg, "user-token", "act_123", "campaign", { from: "2026-10-01", to: "2026-10-02" }, {
+      pause: async (ms) => {
+        pauses.push(ms);
+      },
+      retries: 2,
+    });
+    expect(rows.map((row) => row.spend)).toEqual(["2", "1"]);
+    expect(pauses).toEqual([1000]);
+    expect(calls[0].url.pathname).toBe("/v26.0/act_123/insights");
+    expect(calls[0].url.searchParams.get("level")).toBe("campaign");
+    expect(calls[0].url.searchParams.get("time_increment")).toBe("1");
+    expect(calls.every((call) => call.init.method === "GET")).toBe(true);
+    expect(calls.every((call) => !call.url.searchParams.has("access_token"))).toBe(true);
+    expect(calls.every((call) => !String(call.url).includes("mutate"))).toBe(true);
+  });
+
+  it("refuses a response it could not read to the end", async () => {
+    mockFetch((url) => {
+      const next = new URL(url);
+      next.searchParams.set("after", "more");
+      return { body: { data: [{ date_start: "2026-10-01" }], paging: { next: next.toString() } } };
+    });
+    await expect(
+      fetchMetaInsights(cfg, "user-token", "123", "ad", { from: "2026-10-01", to: "2026-10-01" }, { maxPages: 1, retries: 0 }),
+    ).rejects.toBeInstanceOf(InsightTruncatedError);
   });
 });
 

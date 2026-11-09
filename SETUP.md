@@ -320,6 +320,8 @@ For a whole website on the client's main domain (e.g. `kundensfirma.dk`):
   Set **What counts as a result?** to leads, purchases or bookings — the dashboard uses it.
 - **Giving a client their ad accounts:** on **Ad accounts**, pick the client in the dropdown
   next to an account. That's it. Moving it to another client later works the same way.
+- **Numbers in the database:** after step 9, **Sync now** (or the morning job) fills
+  `ad_insights_daily`. Bots should read `ad_performance_summary`.
 - **Dashboards:** each client's dashboard shows only their assigned accounts — spend,
   impressions and reach, clicks and click-through rate, results and cost per result — for any
   date range.
@@ -368,6 +370,63 @@ businesses, so normal use stays free). It still needs a payment card on the proj
 **Contact & email** on a lead uses the same AI as the website writer (6c): it reads the
 business's website, finds the owner or manager if the site names them, and writes a short
 first email from you. Always read it before sending.
+
+## 9. Daily ad numbers in the database
+
+HolmOS can copy ad performance into the database once a day, so a bot or a spreadsheet can
+query real numbers without calling Meta itself. The dashboards still load live from Meta and
+Google; this is an extra copy.
+
+It only **reads**. It will not create, edit, pause or spend on an ad.
+
+### 9a. Update the database
+
+1. Open `supabase/migrations/0004_ad_insights.sql`, copy the whole file.
+2. In Supabase open *SQL Editor → New query*, paste it, and press **Run**. It should say
+   "Success. No rows returned".
+
+Run it **once**, after 0003. Until it has run, **Ad accounts** shows that the update is
+missing and the sync does nothing.
+
+### 9b. The morning job
+
+The sync uses the same `CRON_SECRET` as booking reminders (step 5c). If that setting is
+already in Vercel, redeploy after this code is live. Vercel then shows a second job under
+*Settings → Cron Jobs*, about an hour after the reminder job (around 7–8am Danish time;
+on the free plan it can be any time during that hour).
+
+The first successful run for an account stores the last 30 complete days. After that, each
+morning refreshes the last 7 days, because Meta changes recent numbers as more results come
+in. **Ad accounts → Sync now** always re-reads 30 days. A failed login is saved on the
+connection ("Needs reconnecting") instead of stopping the other accounts.
+
+Meta needs the **ads_read** permission you already tick in step 3. No new Meta setting.
+
+### 9c. Asking the database
+
+In the Supabase SQL editor (or from a bot using the secret key):
+
+```sql
+select account_name, currency, spend_7d, purchases_7d, purchase_value_7d, roas_7d
+from public.ad_performance_summary
+where level = 'account';
+```
+
+Use `level = 'campaign'` for campaigns. `spend_30d`, `clicks_30d` and the other `_30d`
+columns are the last 30 days. Day-by-day rows are in `ad_insights_daily`.
+
+### 9d. Google Ads (leave this off for now)
+
+Google is not part of the daily sync yet. Turning it on needs all of the following, and
+none of them are done:
+
+- A connected Google login on **Ad accounts** (step 4).
+- `GOOGLE_ADS_DEVELOPER_TOKEN` with **Explorer** or **Basic** access. Test-account access
+  only works with Google's test accounts, and Google's review can take days or weeks.
+- Then set `GOOGLE_ADS_INSIGHTS_ENABLED` to `true` in Vercel and redeploy.
+
+The code path is there and uses the same read-only search the dashboards already use. Until
+the flag is on, Google accounts are skipped and Meta still syncs.
 
 ## Running it on your own computer (optional)
 
